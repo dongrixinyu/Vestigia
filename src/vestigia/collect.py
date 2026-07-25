@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse
+from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse, RequestSignature
 from vestigia.prompts import PromptTemplate, iter_prompts
 
 
@@ -70,7 +70,11 @@ def json_object(value: str, option_name: str) -> Mapping[str, Any]:
 
 
 def response_record(
-    index: int, prompt: str, template: PromptTemplate, response: LLMResponse
+    index: int,
+    prompt: str,
+    template: PromptTemplate,
+    response: LLMResponse,
+    signature: RequestSignature,
 ) -> dict[str, Any]:
     parsed = dict(template.parser(response.text))
     return {
@@ -80,6 +84,7 @@ def response_record(
         "category": template.category,
         "prompt": prompt,
         "status": "ok",
+        "request_signature": signature.to_dict(),
         "parsed": parsed,
         "check_passed": template.checker(response.text, parsed),
         "response": {
@@ -120,9 +125,19 @@ def run(args: argparse.Namespace) -> int:
     failures = 0
     with LLMClient(config) as client, args.output.open("w", encoding="utf-8") as output:
         for index, (prompt, template) in enumerate(iter_prompts(args.count), start=1):
+            signature = RequestSignature(
+                model=config.model,
+                provider=config.provider,
+                prompt=prompt,
+                prompt_id=template.id,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                system=args.system,
+                extra_body=config.extra_body,
+            )
             try:
                 response = client.complete(prompt, system=args.system)
-                record = response_record(index, prompt, template, response)
+                record = response_record(index, prompt, template, response, signature)
                 print(f"[{index}/{args.count}] ok: {template.id}", file=sys.stderr)
             except LLMRequestError as exc:
                 failures += 1

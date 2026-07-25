@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -55,6 +57,75 @@ class LLMResponse:
     usage: Mapping[str, Any] | None
     request_id: str | None
     raw: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RequestSignature:
+    """Deterministic fingerprint of every parameter that influences an LLM response.
+
+    All fields that can change the output — model name, generation knobs,
+    system prompt, user prompt, and any extra body parameters — are folded
+    into a canonical JSON string and hashed with SHA-256.  Two calls that
+    produce identical ``RequestSignature`` objects are guaranteed to have
+    sent byte-for-byte the same logical request; any difference in inputs
+    yields a different ``digest``.
+
+    Usage::
+
+        sig = RequestSignature(
+            model="gpt-4o",
+            provider="openai_compatible",
+            temperature=0.7,
+            max_tokens=256,
+            system="You are helpful.",
+            prompt="What is 2+2?",
+        )
+        record["request_signature"] = sig.digest()
+    """
+
+    model: str
+    provider: Provider
+    prompt: str
+    prompt_id: str
+    temperature: float | None = None
+    max_tokens: int | None = None
+    system: str | None = None
+    extra_body: Mapping[str, Any] = field(default_factory=dict)
+
+    def _canonical(self) -> str:
+        """Stable, sorted JSON representation of all signature fields."""
+        obj: dict[str, Any] = {
+            "model": self.model,
+            "provider": self.provider,
+            "prompt": self.prompt,
+            "prompt_id": self.prompt_id,
+        }
+        if self.temperature is not None:
+            obj["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            obj["max_tokens"] = self.max_tokens
+        if self.system is not None:
+            obj["system"] = self.system
+        if self.extra_body:
+            obj["extra_body"] = self.extra_body
+        return json.dumps(obj, sort_keys=True, ensure_ascii=False)
+
+    def digest(self) -> str:
+        """Return a hex SHA-256 digest that uniquely identifies this request configuration."""
+        return hashlib.sha256(self._canonical().encode()).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialisable representation suitable for embedding in a JSONL record."""
+        return {
+            "digest": self.digest(),
+            "model": self.model,
+            "provider": self.provider,
+            "prompt_id": self.prompt_id,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "system": self.system,
+            "extra_body": dict(self.extra_body) if self.extra_body else {},
+        }
 
 
 class LLMRequestError(RuntimeError):
