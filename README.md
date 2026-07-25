@@ -73,7 +73,23 @@ Anthropic 请求会发送至 `<base_url>/v1/messages`，并带上 `anthropic-ver
 
 ## 固定题库与批量采集
 
-`vestigia.prompts.DEFAULT_PROMPTS` 内置了 8 个探针类别，每类包含 5 个等义但表述不同的固定问题。类别涵盖偏好、自我描述、创意联想、模糊选择、格式服从、日常建议、词语联想和简单解释；例如“给我说一个你最喜欢的数字”有五种问法。采集时会以确定性的顺序轮换类别与同类措辞，因此不同模型可使用完全相同的请求序列比较。
+`vestigia.prompts` 内置了 8 个探针类别。**每一个探针都在 `src/vestigia/prompts/` 中拥有独立模块**，模块提供 `PROMPT`、`parse(response)` 与 `check(response, parsed)`：
+
+```text
+prompts/
+  favorite_number.py         # 数字抽取与校验
+  short_self_description.py
+  creative_association.py
+  ambiguous_choice.py
+  instruction_following.py
+  everyday_advice.py
+  word_association.py
+  simple_explanation.py
+```
+
+题目在每个模块内保留多个等义问法；采集时按确定性顺序轮换类别与同类措辞，使不同模型使用完全相同的请求序列比较。`parser` 输出可用于模型特征分析的结构化字段，`checker` 则判定回答是否满足探针要求。
+
+例如 `favorite_number.py` 能从响应中抽取阿拉伯数字和中文数字，输出原始写法、记法和规范化数值；支持如 `7`、`-12.5`、`七`、`一百零二`、`两千零二十`、`负十二点五`。
 
 安装后使用 `vestigia-collect`。下面示例向 OpenAI-compatible 中转站发起 20 次调用，并将每条结果写入 JSONL：
 
@@ -110,7 +126,22 @@ python -m vestigia.collect \
 - `--extra-body-json '{"top_p":0.9}'`：透传额外生成参数；传入值会覆盖客户端生成的同名请求字段。
 - `--fail-fast`：默认失败仍记录错误并继续；该选项使其在首次失败时退出。
 
-输出为 UTF-8 JSONL（每行一个请求）。成功记录含 `prompt_id`、`category`、实际 `prompt`、最终 `response.text`、服务端模型名、token 用量和请求 ID；失败记录含错误状态码及响应正文，方便后续清洗或重试。
+输出为 UTF-8 JSONL（每行一个请求）。成功记录含 `prompt_id`、`category`、实际 `prompt`、`parsed`（parser 提取的结构化特征）、`check_passed`（checker 检查结果）、最终 `response.text`、服务端模型名、token 用量和请求 ID；失败记录含错误状态码及响应正文，方便后续清洗或重试。
+
+数字题的典型输出片段：
+
+```json
+{
+  "prompt_id": "favorite_number",
+  "parsed": {
+    "numbers": [
+      {"source": "负十二点五", "notation": "chinese", "value": "-12.5"}
+    ],
+    "first_number": {"source": "负十二点五", "notation": "chinese", "value": "-12.5"}
+  },
+  "check_passed": true
+}
+```
 
 可在 Python 中检查题库或生成同样的请求序列：
 
@@ -144,8 +175,8 @@ for prompt, template in iter_prompts(20):
 ```text
 src/vestigia/       可发布的包源码
   llm/              统一的 LLM HTTP 客户端与数据模型
-  prompts.py        固定且具备措辞变体的探针题库
-  collect.py        JSONL 批量采集 CLI
+  prompts/           每个文件一个探针，含题目、parser、checker
+  collect.py         JSONL 批量采集 CLI
 tests/              单元测试
 pyproject.toml      打包、依赖和工具配置
 requirements*.txt   便捷依赖入口

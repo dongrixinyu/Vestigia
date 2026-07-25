@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vestigia.llm import LLMClient, LLMConfig, LLMRequestError
-from vestigia.prompts import iter_prompts
+from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse
+from vestigia.prompts import PromptTemplate, iter_prompts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,15 +70,18 @@ def json_object(value: str, option_name: str) -> Mapping[str, Any]:
 
 
 def response_record(
-    index: int, prompt: str, template_id: str, category: str, response: Any
+    index: int, prompt: str, template: PromptTemplate, response: LLMResponse
 ) -> dict[str, Any]:
+    parsed = dict(template.parser(response.text))
     return {
         "index": index,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "prompt_id": template_id,
-        "category": category,
+        "prompt_id": template.id,
+        "category": template.category,
         "prompt": prompt,
         "status": "ok",
+        "parsed": parsed,
+        "check_passed": template.checker(response.text, parsed),
         "response": {
             "text": response.text,
             "model": response.model,
@@ -119,7 +122,7 @@ def run(args: argparse.Namespace) -> int:
         for index, (prompt, template) in enumerate(iter_prompts(args.count), start=1):
             try:
                 response = client.complete(prompt, system=args.system)
-                record = response_record(index, prompt, template.id, template.category, response)
+                record = response_record(index, prompt, template, response)
                 print(f"[{index}/{args.count}] ok: {template.id}", file=sys.stderr)
             except LLMRequestError as exc:
                 failures += 1
