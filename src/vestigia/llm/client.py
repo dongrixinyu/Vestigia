@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -178,9 +179,7 @@ class LLMClient:
         data = self._json(response)
         try:
             text = "".join(
-                str(block["text"])
-                for block in data["content"]
-                if block.get("type") == "text"
+                str(block["text"]) for block in data["content"] if block.get("type") == "text"
             )
         except (KeyError, TypeError) as exc:
             raise LLMRequestError("invalid Anthropic response format") from exc
@@ -207,7 +206,16 @@ class LLMClient:
     def _post(
         self, url: str, *, headers: Mapping[str, str], payload: Mapping[str, Any]
     ) -> httpx.Response:
-        merged_headers = {**headers, **self.config.extra_headers}
+        cache_headers = (
+            {"Cache-Control": "no-cache, no-store, max-age=0", "Pragma": "no-cache"}
+            if self.config.disable_response_cache
+            else {}
+        )
+        merged_headers = {**headers, **cache_headers, **self.config.extra_headers}
+        if self.config.cache_bust_query_param:
+            url = str(
+                httpx.URL(url).copy_add_param(self.config.cache_bust_query_param, uuid4().hex)
+            )
         try:
             response = self._http_client.post(url, headers=merged_headers, json=payload)
             response.raise_for_status()
@@ -244,7 +252,8 @@ def _content_to_text(content: Any) -> str:
         return "".join(
             str(part["text"])
             for part in content
-            if isinstance(part, Mapping) and part.get("type") in {"text", "output_text"}
+            if isinstance(part, Mapping)
+            and part.get("type") in {"text", "output_text"}
             and "text" in part
         )
     raise ValueError("response message content is not text")

@@ -32,6 +32,8 @@ class LLMConfig:
     api_version: str = "2023-06-01"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     extra_body: Mapping[str, Any] = field(default_factory=dict)
+    disable_response_cache: bool = True
+    cache_bust_query_param: str | None = None
 
     def __post_init__(self) -> None:
         if not self.base_url.strip():
@@ -44,6 +46,8 @@ class LLMConfig:
             raise ValueError("timeout must be greater than zero")
         if self.max_tokens is not None and self.max_tokens <= 0:
             raise ValueError("max_tokens must be greater than zero")
+        if self.cache_bust_query_param is not None and not self.cache_bust_query_param.strip():
+            raise ValueError("cache_bust_query_param must not be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +95,8 @@ class RequestSignature:
     max_tokens: int | None = None
     system: str | None = None
     extra_body: Mapping[str, Any] = field(default_factory=dict)
+    disable_response_cache: bool = True
+    cache_bust_query_param: str | None = None
 
     def _canonical(self) -> str:
         """Stable, sorted JSON representation of all signature fields."""
@@ -108,6 +114,9 @@ class RequestSignature:
             obj["system"] = self.system
         if self.extra_body:
             obj["extra_body"] = self.extra_body
+        obj["disable_response_cache"] = self.disable_response_cache
+        if self.cache_bust_query_param is not None:
+            obj["cache_bust_query_param"] = self.cache_bust_query_param
         return json.dumps(obj, sort_keys=True, ensure_ascii=False)
 
     def digest(self) -> str:
@@ -121,10 +130,13 @@ class RequestSignature:
             "model": self.model,
             "provider": self.provider,
             "prompt_id": self.prompt_id,
+            "prompt": self.prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "system": self.system,
             "extra_body": dict(self.extra_body) if self.extra_body else {},
+            "disable_response_cache": self.disable_response_cache,
+            "cache_bust_query_param": self.cache_bust_query_param,
         }
 
 

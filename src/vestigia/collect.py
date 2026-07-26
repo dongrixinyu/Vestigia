@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vestigia.fingerprint import build_fingerprint
 from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse, RequestSignature
-from vestigia.prompts import PromptTemplate, iter_prompts
+from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate, iter_prompts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +38,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--count", type=int, default=20, help="Number of requests (default: 20)")
     parser.add_argument("--output", type=Path, required=True, help="Destination JSONL file")
+    parser.add_argument(
+        "--prompt-id",
+        choices=tuple(template.id for template in DEFAULT_PROMPTS),
+        help="Repeat one probe instead of cycling through the complete prompt set",
+    )
+    parser.add_argument(
+        "--variant-index",
+        type=int,
+        default=0,
+        help="Zero-based prompt wording to use with --prompt-id (default: 0)",
+    )
+    parser.add_argument(
+        "--fingerprint-output",
+        type=Path,
+        help="Optional JSON file for the empirical response distribution",
+    )
+    parser.add_argument(
+        "--fingerprint-field",
+        default="parsed",
+        help="Dotted record field to count, e.g. parsed.first_number.value (default: parsed)",
+    )
+    parser.add_argument(
+        "--allow-response-cache",
+        action="store_true",
+        help="Do not send standard no-cache HTTP headers (not recommended for fingerprinting)",
+    )
+    parser.add_argument(
+        "--cache-bust-query-param",
+        help="Unique query parameter for every request, for gateways that ignore no-cache headers",
+    )
     parser.add_argument("--temperature", type=float, help="Sampling temperature")
     parser.add_argument("--max-tokens", type=int, help="Maximum generated tokens")
     parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds")
@@ -49,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--extra-body-json",
         default="{}",
-        help='Additional JSON body fields, e.g. \'{"top_p":0.9}\'',
+        help="Additional JSON body fields, e.g. '{\"top_p\":0.9}'",
     )
     parser.add_argument(
         "--fail-fast",
@@ -104,6 +135,21 @@ def run(args: argparse.Namespace) -> int:
     if args.count < 1:
         raise ValueError("--count must be greater than zero")
 
+    if args.prompt_id:
+        template = next(template for template in DEFAULT_PROMPTS if template.id == args.prompt_id)
+        if not 0 <= args.variant_index < len(template.variants):
+            raise ValueError(
+                f"--variant-index must be between 0 and {len(template.variants) - 1} "
+                f"for --prompt-id {args.prompt_id!r}"
+            )
+        prompt_sequence = (
+            (template.variants[args.variant_index], template) for _ in range(args.count)
+        )
+    else:
+        if args.variant_index != 0:
+            raise ValueError("--variant-index requires --prompt-id")
+        prompt_sequence = iter_prompts(args.count)
+
     headers = json_object(args.extra_headers_json, "--extra-headers-json")
     if not all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items()):
         raise ValueError("--extra-headers-json keys and values must be strings")
@@ -119,12 +165,15 @@ def run(args: argparse.Namespace) -> int:
         max_tokens=args.max_tokens,
         extra_headers=headers,
         extra_body=extra_body,
+        disable_response_cache=not args.allow_response_cache,
+        cache_bust_query_param=args.cache_bust_query_param,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     failures = 0
+    records: list[dict[str, Any]] = []
     with LLMClient(config) as client, args.output.open("w", encoding="utf-8") as output:
-        for index, (prompt, template) in enumerate(iter_prompts(args.count), start=1):
+        for index, (prompt, template) in enumerate(prompt_sequence, start=1):
             signature = RequestSignature(
                 model=config.model,
                 provider=config.provider,
@@ -134,6 +183,8 @@ def run(args: argparse.Namespace) -> int:
                 max_tokens=config.max_tokens,
                 system=args.system,
                 extra_body=config.extra_body,
+                disable_response_cache=config.disable_response_cache,
+                cache_bust_query_param=config.cache_bust_query_param,
             )
             try:
                 response = client.complete(prompt, system=args.system)
@@ -160,6 +211,14 @@ def run(args: argparse.Namespace) -> int:
                     return 1
             output.write(json.dumps(record, ensure_ascii=False) + "\n")
             output.flush()
+            records.append(record)
+
+    if args.fingerprint_output:
+        args.fingerprint_output.parent.mkdir(parents=True, exist_ok=True)
+        fingerprint = build_fingerprint(records, field=args.fingerprint_field)
+        args.fingerprint_output.write_text(
+            json.dumps(fingerprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
     return 1 if failures else 0
 
 

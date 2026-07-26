@@ -38,6 +38,7 @@ dev = [
 
 [project.scripts]
 vestigia-collect = "vestigia.collect:main"
+vestigia-validate = "vestigia.validate:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/Vestigia"

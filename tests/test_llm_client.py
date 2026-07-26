@@ -18,9 +18,7 @@ def test_openai_compatible_completion_normalizes_response() -> None:
             json={
                 "id": "chatcmpl_123",
                 "model": "gateway-model",
-                "choices": [
-                    {"message": {"content": "final answer"}, "finish_reason": "stop"}
-                ],
+                "choices": [{"message": {"content": "final answer"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 4, "completion_tokens": 2},
             },
         )
@@ -40,6 +38,8 @@ def test_openai_compatible_completion_normalizes_response() -> None:
     assert route.called
     request = route.calls.last.request
     assert request.headers["authorization"] == "Bearer secret"
+    assert request.headers["cache-control"] == "no-cache, no-store, max-age=0"
+    assert request.headers["pragma"] == "no-cache"
     assert json.loads(request.content) == {
         "model": "configured-model",
         "messages": [
@@ -53,6 +53,34 @@ def test_openai_compatible_completion_normalizes_response() -> None:
     assert response.text == "final answer"
     assert response.model == "gateway-model"
     assert response.request_id == "req_123"
+
+
+@respx.mock
+def test_cache_buster_uses_a_unique_url_parameter_without_changing_the_body() -> None:
+    route = respx.post(
+        url__regex=r"https://gateway\.example/chat/completions\?cache_bust=[0-9a-f]+$"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "answer"}, "finish_reason": "stop"}]},
+        )
+    )
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example",
+            api_key="secret",
+            model="model",
+            cache_bust_query_param="cache_bust",
+        )
+    )
+
+    client.complete("hello")
+
+    assert route.called
+    request = route.calls.last.request
+    assert request.url.params["cache_bust"]
+    assert json.loads(request.content)["messages"] == [{"role": "user", "content": "hello"}]
 
 
 @respx.mock

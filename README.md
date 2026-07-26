@@ -128,6 +128,146 @@ python -m vestigia.collect \
 
 输出为 UTF-8 JSONL（每行一个请求）。成功记录含 `prompt_id`、`category`、实际 `prompt`、`parsed`（parser 提取的结构化特征）、`check_passed`（checker 检查结果）、最终 `response.text`、服务端模型名、token 用量和请求 ID；失败记录含错误状态码及响应正文，方便后续清洗或重试。
 
+例如，要把 temperature 为 0.1 时“最喜欢的数字”题的回答分布保存为指纹，可固定**同一题目和同一措辞**重复调用：
+
+```bash
+vestigia-collect \
+  --base-url "https://gateway.example.com/v1" \
+  --model "example-model" \
+  --prompt-id favorite_number \
+  --variant-index 0 \
+  --count 20 \
+  --temperature 0.1 \
+  --max-tokens 64 \
+  --output samples/example-number-raw.jsonl \
+  --fingerprint-output samples/example-number-fingerprint.json \
+  --fingerprint-field parsed.first_number.value
+```
+
+原始 JSONL 会保留每一次调用；`--fingerprint-output` 会额外写入聚合后的经验分布。结果会按完整请求签名（模型、协议、题目与原文、temperature、max tokens、system、`extra_body`）隔离，避免把不同配置混在一个指纹中。上述例子中，若 11 条成功结果中 `76` 有 10 次、`34` 有 1 次，输出包含：
+
+```json
+{
+  "sample_count": 11,
+  "field": "parsed.first_number.value",
+  "values": [
+    {"value": "76", "count": 10, "proportion": 0.9090909090909091},
+    {"value": "34", "count": 1, "proportion": 0.09090909090909091}
+  ]
+}
+```
+
+省略 `--prompt-id` 时仍按固定题库轮换；此时输出会为每个题目/措辞/参数组合分别生成分布。对开放题可把 `--fingerprint-field` 设为 `parsed.text`；默认值 `parsed` 会统计整个结构化解析结果。
+
+### 防止网关返回旧响应
+
+Vestigia 默认会在每个请求中发送以下 HTTP 响应缓存控制头：
+
+```http
+Cache-Control: no-cache, no-store, max-age=0
+Pragma: no-cache
+```
+
+它们用于阻止中转网关或代理直接返回此前的完整文本响应；这不会修改 `messages` 或 prompt，因此不会污染分布指纹。默认行为由 `LLMConfig(disable_response_cache=True)` 控制；只有明确需要时才设置为 `False`，或在 CLI 使用 `--allow-response-cache`。
+
+部分不遵守 HTTP 缓存头的网关会以 URL 作为响应缓存键。此时使用每次请求都不同、但不进入模型上下文的查询参数：
+
+```bash
+vestigia-collect ... --cache-bust-query-param vestigia_request
+```
+
+Python 中：
+
+```python
+config = LLMConfig(
+    provider="openai_compatible",
+    base_url="https://gateway.example.com/v1",
+    api_key="...",
+    model="example-model",
+    cache_bust_query_param="vestigia_request",
+)
+```
+
+客户端会追加类似 `?vestigia_request=<随机 UUID>` 的 URL 参数。它不会改变请求 body、prompt 或模型采样条件，因此同一分布指纹仍可比较；请求签名也会记录此策略。若网关有私有缓存开关（如请求体 `cache: false`），仍应按其文档通过 `extra_body` 或 `extra_headers` 传入。Anthropic 的显式 Prompt Caching 只有附加 `cache_control` 内容块才会启用；Vestigia 不会添加该字段。
+
+### 指纹稳定性验证与模型比较
+
+仅有“Claude 20 次中 76 出现 10 次”还不足以作为可用指纹：需要先验证该比例在同一模型、同一请求配置下是否稳定。对某模型先采集至少 50 条成功样本，再运行：
+
+```bash
+vestigia-validate \
+  --input samples/claude-number-50.jsonl \
+  --field parsed.first_number.value \
+  --sample-size 20 \
+  --resamples 1000 \
+  --seed 42 \
+  --max-p95-tv-distance 0.20 \
+  --output samples/claude-number-validation.json
+```
+
+该命令会从 50 条记录中随机、**无放回**抽取 1,000 个 20 条子集，并分别与完整 50 条的分布比较。报告给出 total variation（TV）距离和 Jensen-Shannon（JS）距离；二者都是 `0` 表示相同，数值越大表示越不同。默认规则是：20 条子集相对完整样本的 TV 距离第 95 百分位（`p95`）不大于 `0.20`，该特征才标为 `reliable: true`。`--seed` 使这项 Monte-Carlo 检验可复现。
+
+要比较两个已经稳定的模型：
+
+```bash
+vestigia-validate \
+  --input samples/claude-number-50.jsonl \
+  --compare-input samples/kimi-number-50.jsonl \
+  --field parsed.first_number.value \
+  --sample-size 20 \
+  --resamples 1000 \
+  --seed 42
+```
+
+报告中的 `comparison.between_model.total_variation_distance` 就是两模型的分布差异。例如 Claude 的 `76` 概率约为 50%、Kimi 的 `36` 概率约为 60%，会产生明显的 TV/JS 距离。只有两边都通过稳定性检验，并且模型间 TV 距离大于两边各自的子集波动 `p95`，才会得到 `distinguishable: true`。这避免将采样噪声误判成模型差异。
+
+### Python API：建立基准并测试待测模型
+
+除了 CLI，也可直接在代码中建立一个可验证的参考指纹，再对待测模型发起同样的请求：
+
+```python
+from vestigia import (
+    LLMClient,
+    LLMConfig,
+    build_model_fingerprint,
+    test_model_against_fingerprint,
+)
+from vestigia.prompts.favorite_number import parse
+
+reference = LLMClient(LLMConfig(
+    provider="anthropic",
+    base_url="https://api.anthropic.com",
+    api_key="...",
+    model="claude-sonnet-4-20250514",
+    temperature=0.1,
+    max_tokens=64,
+))
+
+fingerprint = build_model_fingerprint(
+    reference,
+    "请只回答你最喜欢的一个数字。",
+    parse,
+    field="parsed.first_number.value",
+    count=50,
+    subset_size=20,
+    resamples=1000,
+    seed=42,
+)
+assert fingerprint.stability["reliable"]
+
+candidate = LLMClient(LLMConfig(
+    provider="openai_compatible",
+    base_url="https://gateway.example.com/v1",
+    api_key="...",
+    model="unknown-model",
+))
+result = test_model_against_fingerprint(candidate, fingerprint, parse, count=20)
+print(result.matches_reference)
+print(result.distances["total_variation_distance"])
+```
+
+`build_model_fingerprint` 会进行多次调用、提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens；只有参考指纹可靠、且待测分布的 TV 距离不超过参考抽样波动的 `p95`，`matches_reference` 才为真。结果对象均可用 `.to_dict()` 保存为 JSON。
+
 数字题的典型输出片段：
 
 ```json
