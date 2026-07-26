@@ -31,6 +31,7 @@ class ModelFingerprint:
     system: str | None
     temperature: float | None
     max_tokens: int | None
+    request_configuration: Mapping[str, Any]
     field: str
     values: tuple[str, ...]
     distribution: Mapping[str, float]
@@ -84,6 +85,9 @@ def build_model_fingerprint(
     whitespace and punctuation are included so the metric stays deterministic.
     """
     _validate_count(count, "count")
+    request_configuration = _request_configuration(
+        client, temperature=temperature, max_tokens=max_tokens
+    )
     values, text_lengths = _collect_values(
         client,
         prompt,
@@ -115,6 +119,7 @@ def build_model_fingerprint(
         system=system,
         temperature=temperature if temperature is not None else client.config.temperature,
         max_tokens=max_tokens if max_tokens is not None else client.config.max_tokens,
+        request_configuration=request_configuration,
         field=field,
         values=tuple(values),
         distribution=distribution(values),
@@ -132,6 +137,13 @@ def test_model_against_fingerprint(
 ) -> FingerprintTestResult:
     """Call a candidate and require both response distribution and length to match."""
     _validate_count(count, "count")
+    candidate_configuration = _request_configuration(
+        client, temperature=fingerprint.temperature, max_tokens=fingerprint.max_tokens
+    )
+    if candidate_configuration["extra_body"] != fingerprint.request_configuration["extra_body"]:
+        raise ValueError(
+            "candidate client extra_body must match the fingerprint sampling parameters"
+        )
     values, text_lengths = _collect_values(
         client,
         fingerprint.prompt,
@@ -190,6 +202,26 @@ def test_model_against_fingerprint(
 
 # Prevent pytest from mistaking this public API function for a test when imported.
 test_model_against_fingerprint.__test__ = False
+
+
+def _request_configuration(
+    client: LLMClient, *, temperature: float | None, max_tokens: int | None
+) -> dict[str, Any]:
+    """Return non-secret controls that define a comparable sampling configuration."""
+    return {
+        "provider": client.config.provider,
+        "model": client.config.model,
+        "temperature": temperature if temperature is not None else client.config.temperature,
+        "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
+        "extra_body": dict(getattr(client.config, "extra_body", {})),
+        "api_version": (
+            getattr(client.config, "api_version", None)
+            if client.config.provider == "anthropic"
+            else None
+        ),
+        "disable_response_cache": getattr(client.config, "disable_response_cache", True),
+        "cache_bust_query_param": getattr(client.config, "cache_bust_query_param", None),
+    }
 
 
 def _collect_values(

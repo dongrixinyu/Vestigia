@@ -2,6 +2,16 @@
 
 `Vestigia` 是一个可安装的 Python 包，用于通过一组问题采集多个 LLM 的非流式回答，并为后续的模型来源识别（fingerprinting）提供统一数据入口。
 
+这里的“指纹”不是单独的模型名称，也不是单次回答。一个可比较的指纹由以下内容共同确定：
+
+1. **模型身份**：`provider` 与供应商实际接受的 `model` 标识；
+2. **固定输入**：完整 user prompt、system instruction、探针版本/措辞；
+3. **完整采样配置**：`temperature`、`max_tokens`，以及 `extra_body` 内的 `top_p`、`top_k`、`seed`、`frequency_penalty`、`presence_penalty` 或网关支持的其他生成参数；
+4. **缓存策略/协议版本**：响应缓存禁用策略、cache-buster 参数、Anthropic API version；
+5. **统计输出特征**：解析后的分类分布，以及按 2 的幂分桶的响应文本长度分布。
+
+因此，`model="claude...", temperature=0.1, top_p=0.9` 与同模型的 `temperature=0.7` 是**两组不同指纹**，必须分别采集、验证和比较；不能混合样本。
+
 当前版本先提供稳定的 **LLM 调用层**：支持 OpenAI Chat Completions 兼容接口（模型官网或中转站）以及 Anthropic Messages 接口；不会依赖特定厂商 SDK。
 
 ## 安装
@@ -241,6 +251,8 @@ reference = LLMClient(LLMConfig(
     model="claude-sonnet-4-20250514",
     temperature=0.1,
     max_tokens=64,
+    # 所有额外的采样旋钮也属于此指纹，必须固定并记录。
+    extra_body={"top_p": 0.9},
 ))
 
 fingerprint = build_model_fingerprint(
@@ -266,7 +278,9 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 会进行多次调用、提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。它还会将每次 `response.text` 的原始 Unicode 字符数（**包含空白、标点和换行**）作为第二项特征，但不统计每一个精确长度：长度会按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens；分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
+`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。它还会将每次 `response.text` 的原始 Unicode 字符数（**包含空白、标点和换行**）作为第二项特征，但不统计每一个精确长度：长度会按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
+
+`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 
 数字题的典型输出片段：
 

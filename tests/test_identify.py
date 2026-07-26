@@ -54,6 +54,9 @@ def test_public_api_builds_reference_then_accepts_matching_candidate() -> None:
     assert fingerprint.text_length["statistics"]["mean"] == 2.0
     assert fingerprint.text_length["bucket_scheme"] == "power_of_two_characters"
     assert fingerprint.distribution == {'"76"': 1.0}
+    assert fingerprint.request_configuration["model"] == "claude-reference"
+    assert fingerprint.request_configuration["temperature"] == 0.1
+    assert fingerprint.request_configuration["extra_body"] == {}
     assert result.matches_reference is True
     assert result.distances["total_variation_distance"] == 0.0
     assert candidate_client.calls[0] == {
