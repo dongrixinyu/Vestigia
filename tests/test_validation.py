@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from vestigia.validation import compare_distributions, successful_values, validate_stability
+from vestigia.validation import (
+    compare_distributions,
+    log_length_bucket,
+    successful_values,
+    validate_length_distribution,
+    validate_stability,
+)
 
 
 def test_stability_is_reproducible_and_accepts_a_stable_distribution() -> None:
@@ -28,6 +34,22 @@ def test_comparison_separates_distinct_model_distributions() -> None:
 
     assert distances["total_variation_distance"] == pytest.approx(0.9)
     assert distances["jensen_shannon_distance"] > 0.6
+
+
+def test_length_distribution_uses_power_of_two_buckets() -> None:
+    values = [1, 2, 3, 4, 7, 8, 15, 16]
+
+    result = validate_length_distribution(values, sample_size=4, resamples=20, seed=1)
+
+    assert log_length_bucket(7) == {"lower": 4, "upper_exclusive": 8}
+    assert result["bucket_scheme"] == "power_of_two_characters"
+    assert result["distribution"] == {
+        '{"lower":1,"upper_exclusive":2}': 0.125,
+        '{"lower":2,"upper_exclusive":4}': 0.25,
+        '{"lower":4,"upper_exclusive":8}': 0.25,
+        '{"lower":8,"upper_exclusive":16}': 0.25,
+        '{"lower":16,"upper_exclusive":32}': 0.125,
+    }
 
 
 def test_successful_values_ignores_errors_and_canonicalizes_feature() -> None:

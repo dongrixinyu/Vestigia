@@ -8,19 +8,22 @@ from typing import Any
 
 from vestigia.fingerprint import canonical_value, resolve_field
 from vestigia.llm import LLMClient, LLMResponse
-from vestigia.validation import compare_distributions, distribution, validate_stability
+from vestigia.validation import (
+    compare_distributions,
+    distribution,
+    log_length_values,
+    text_length_summary,
+    total_variation_distance,
+    validate_length_distribution,
+    validate_stability,
+)
 
 Parser = Callable[[str], Mapping[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
 class ModelFingerprint:
-    """A reference feature distribution obtained from repeated calls to one model.
-
-    ``values`` retain the individual canonical feature values, allowing the
-    stability test to be repeated with a different threshold or subset size.
-    They may be omitted when serialising a compact, distribution-only report.
-    """
+    """Validated categorical and response-length reference features for one model."""
 
     model: str
     provider: str
@@ -31,6 +34,7 @@ class ModelFingerprint:
     field: str
     values: tuple[str, ...]
     distribution: Mapping[str, float]
+    text_length: Mapping[str, Any]
     stability: Mapping[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -40,13 +44,14 @@ class ModelFingerprint:
 
 @dataclass(frozen=True, slots=True)
 class FingerprintTestResult:
-    """Result of testing a model's repeated output against a reference."""
+    """Result of testing repeated candidate outputs against a reference."""
 
     reference_model: str
     tested_model: str
     field: str
     successful_sample_count: int
     distribution: Mapping[str, float]
+    text_length: Mapping[str, Any]
     distances: Mapping[str, float]
     acceptance_tv_distance: float
     reference_reliable: bool
@@ -71,16 +76,15 @@ def build_model_fingerprint(
     resamples: int = 1_000,
     seed: int | None = 0,
     max_p95_tv_distance: float = 0.20,
+    max_p95_length_tv_distance: float = 0.20,
 ) -> ModelFingerprint:
-    """Call a model repeatedly and construct a validated reference distribution.
+    """Call a model repeatedly and build distribution and text-length features.
 
-    ``parser`` receives each final text and must return the feature to count.
-    For example, pass ``favorite_number.parse`` and leave ``field`` as
-    ``"parsed"`` to count its complete parsed output, or provide a parser that
-    returns ``{"value": "76"}`` and use ``field="value"``.
+    Text length is raw Unicode character count of ``LLMResponse.text``;
+    whitespace and punctuation are included so the metric stays deterministic.
     """
     _validate_count(count, "count")
-    values = _collect_values(
+    values, text_lengths = _collect_values(
         client,
         prompt,
         parser,
@@ -97,6 +101,13 @@ def build_model_fingerprint(
         seed=seed,
         max_p95_tv_distance=max_p95_tv_distance,
     )
+    text_length = validate_length_distribution(
+        text_lengths,
+        sample_size=subset_size,
+        resamples=resamples,
+        seed=seed,
+        max_p95_tv_distance=max_p95_length_tv_distance,
+    )
     return ModelFingerprint(
         model=client.config.model,
         provider=client.config.provider,
@@ -107,6 +118,7 @@ def build_model_fingerprint(
         field=field,
         values=tuple(values),
         distribution=distribution(values),
+        text_length=text_length,
         stability=stability,
     )
 
@@ -118,16 +130,9 @@ def test_model_against_fingerprint(
     *,
     count: int = 20,
 ) -> FingerprintTestResult:
-    """Call a candidate model and determine whether it matches a fingerprint.
-
-    The candidate receives the exact prompt and generation settings used for
-    the reference. It matches only if the reference was stable and the
-    candidate's TV distance is no greater than the reference subset TV p95.
-    This deliberately conservative rule prevents ordinary sampling variation
-    from being treated as a model identity difference.
-    """
+    """Call a candidate and require both response distribution and length to match."""
     _validate_count(count, "count")
-    values = _collect_values(
+    values, text_lengths = _collect_values(
         client,
         fingerprint.prompt,
         parser,
@@ -140,17 +145,46 @@ def test_model_against_fingerprint(
     distances = compare_distributions(fingerprint.values, values)
     acceptance = float(fingerprint.stability["total_variation_distance"]["p95"])
     reference_reliable = bool(fingerprint.stability["reliable"])
+    reference_length_reliable = bool(fingerprint.text_length["stability"]["reliable"])
+    candidate_length = text_length_summary(text_lengths)
+    candidate_length_buckets = distribution(log_length_values(text_lengths))
+    reference_length_buckets = fingerprint.text_length["distribution"]
+    length_distances = {
+        "total_variation_distance": total_variation_distance(
+            reference_length_buckets, candidate_length_buckets
+        )
+    }
+    length_acceptance = float(
+        fingerprint.text_length["stability"]["total_variation_distance"]["p95"]
+    )
+    length_result = {
+        **candidate_length,
+        "bucket_scheme": fingerprint.text_length["bucket_scheme"],
+        "distribution": candidate_length_buckets,
+        "distances": length_distances,
+        "acceptance_tv_distance": length_acceptance,
+        "reference_reliable": reference_length_reliable,
+        "matches_reference": (
+            reference_length_reliable
+            and length_distances["total_variation_distance"] <= length_acceptance
+        ),
+    }
     return FingerprintTestResult(
         reference_model=fingerprint.model,
         tested_model=client.config.model,
         field=fingerprint.field,
         successful_sample_count=len(values),
         distribution=distribution(values),
+        text_length=length_result,
         distances=distances,
         acceptance_tv_distance=acceptance,
         reference_reliable=reference_reliable,
-        matches_reference=reference_reliable
-        and distances["total_variation_distance"] <= acceptance,
+        matches_reference=(
+            reference_reliable
+            and reference_length_reliable
+            and distances["total_variation_distance"] <= acceptance
+            and length_distances["total_variation_distance"] <= length_acceptance
+        ),
     )
 
 
@@ -168,15 +202,17 @@ def _collect_values(
     temperature: float | None,
     max_tokens: int | None,
     field: str,
-) -> list[str]:
+) -> tuple[list[str], list[int]]:
     values: list[str] = []
+    text_lengths: list[int] = []
     for _ in range(count):
         response: LLMResponse = client.complete(
             prompt, system=system, temperature=temperature, max_tokens=max_tokens
         )
         parsed = parser(response.text)
         values.append(canonical_value(resolve_field({"parsed": parsed}, field)))
-    return values
+        text_lengths.append(len(response.text))
+    return values, text_lengths
 
 
 def _validate_count(value: int, name: str) -> None:

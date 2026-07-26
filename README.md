@@ -266,7 +266,7 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 会进行多次调用、提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens；只有参考指纹可靠、且待测分布的 TV 距离不超过参考抽样波动的 `p95`，`matches_reference` 才为真。结果对象均可用 `.to_dict()` 保存为 JSON。
+`build_model_fingerprint` 会进行多次调用、提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。它还会将每次 `response.text` 的原始 Unicode 字符数（**包含空白、标点和换行**）作为第二项特征，但不统计每一个精确长度：长度会按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens；分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 
 数字题的典型输出片段：
 

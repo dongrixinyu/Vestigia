@@ -126,6 +126,106 @@ def compare_distributions(left: Sequence[str], right: Sequence[str]) -> dict[str
     }
 
 
+def log_length_bucket(length: int) -> dict[str, int]:
+    """Map a character length to a power-of-two histogram bucket.
+
+    Positive lengths are grouped as ``[1, 2)``, ``[2, 4)``, ``[4, 8)`` and
+    so on. Zero has its own bucket. This prevents a few very long answers from
+    making an exact-length histogram sparse and unstable.
+    """
+    if length < 0:
+        raise ValueError("text length must not be negative")
+    if length == 0:
+        return {"lower": 0, "upper_exclusive": 1}
+    lower = 1 << (length.bit_length() - 1)
+    return {"lower": lower, "upper_exclusive": lower * 2}
+
+
+def log_length_values(values: Iterable[int]) -> list[str]:
+    """Return canonical power-of-two bucket values for text lengths."""
+    return [canonical_value(log_length_bucket(value)) for value in values]
+
+
+def text_length_summary(values: Sequence[int]) -> dict[str, float]:
+    """Return descriptive statistics for raw response lengths in Unicode characters."""
+    if not values:
+        raise ValueError("text length statistics require at least one sample")
+    mean = fmean(values)
+    variance = fmean((value - mean) ** 2 for value in values)
+    return {
+        "mean": mean,
+        "standard_deviation": math.sqrt(variance),
+        "min": float(min(values)),
+        "max": float(max(values)),
+    }
+
+
+def validate_length_distribution(
+    values: Sequence[int],
+    *,
+    sample_size: int = 20,
+    resamples: int = 1_000,
+    seed: int | None = 0,
+    max_p95_tv_distance: float = 0.20,
+) -> dict[str, Any]:
+    """Validate a power-of-two text-length histogram using subset TV distance."""
+    buckets = log_length_values(values)
+    result = validate_stability(
+        buckets,
+        sample_size=sample_size,
+        resamples=resamples,
+        seed=seed,
+        max_p95_tv_distance=max_p95_tv_distance,
+    )
+    return {
+        "bucket_scheme": "power_of_two_characters",
+        "statistics": text_length_summary(values),
+        "distribution": result["reference_distribution"],
+        "stability": {
+            key: value
+            for key, value in result.items()
+            if key not in {"successful_sample_count", "reference_distribution"}
+        },
+    }
+
+
+def validate_mean_stability(
+    values: Sequence[int],
+    *,
+    sample_size: int = 20,
+    resamples: int = 1_000,
+    seed: int | None = 0,
+    max_p95_relative_mean_delta: float = 0.20,
+) -> dict[str, Any]:
+    """Validate whether subset mean text length is stable relative to the full run."""
+    if sample_size < 1:
+        raise ValueError("sample_size must be greater than zero")
+    if sample_size > len(values):
+        raise ValueError("sample_size cannot exceed the successful sample count")
+    if resamples < 1:
+        raise ValueError("resamples must be greater than zero")
+    if not 0 <= max_p95_relative_mean_delta:
+        raise ValueError("max_p95_relative_mean_delta must not be negative")
+
+    reference_mean = fmean(values)
+    generator = random.Random(seed)
+    deltas = [
+        abs(fmean(generator.sample(values, sample_size)) - reference_mean) for _ in range(resamples)
+    ]
+    p95 = percentile(deltas, 0.95)
+    relative_p95 = p95 / reference_mean if reference_mean else 0.0 if p95 == 0 else math.inf
+    return {
+        "statistics": text_length_summary(values),
+        "subset_size": sample_size,
+        "resamples": resamples,
+        "seed": seed,
+        "absolute_mean_delta": _summary(deltas),
+        "p95_relative_mean_delta": relative_p95,
+        "max_p95_relative_mean_delta": max_p95_relative_mean_delta,
+        "reliable": relative_p95 <= max_p95_relative_mean_delta,
+    }
+
+
 def _summary(distances: Sequence[float]) -> dict[str, float]:
     return {
         "mean": fmean(distances),

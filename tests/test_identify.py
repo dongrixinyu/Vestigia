@@ -51,6 +51,8 @@ def test_public_api_builds_reference_then_accepts_matching_candidate() -> None:
     result = test_model_against_fingerprint(candidate_client, fingerprint, parse_number, count=20)
 
     assert fingerprint.stability["reliable"] is True
+    assert fingerprint.text_length["statistics"]["mean"] == 2.0
+    assert fingerprint.text_length["bucket_scheme"] == "power_of_two_characters"
     assert fingerprint.distribution == {'"76"': 1.0}
     assert result.matches_reference is True
     assert result.distances["total_variation_distance"] == 0.0
@@ -79,4 +81,26 @@ def test_public_api_rejects_a_different_output_distribution() -> None:
 
     assert result.reference_reliable is True
     assert result.distances["total_variation_distance"] == 1.0
+
+
+def test_public_api_rejects_same_category_with_a_different_mean_text_length() -> None:
+    fingerprint = build_model_fingerprint(
+        FakeClient("reference", ["76"] * 50),
+        "Pick a favorite number.",
+        lambda _: {"value": "constant"},
+        field="parsed.value",
+        count=50,
+        subset_size=20,
+        resamples=20,
+    )
+
+    result = test_model_against_fingerprint(
+        FakeClient("verbose-model", ["76 -- explanation"] * 20),
+        fingerprint,
+        lambda _: {"value": "constant"},
+    )
+
+    assert result.distances["total_variation_distance"] == 0.0
+    assert result.text_length["distances"]["total_variation_distance"] == 1.0
+    assert result.text_length["matches_reference"] is False
     assert result.matches_reference is False
