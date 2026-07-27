@@ -91,6 +91,11 @@ class RequestSignature:
     provider: Provider
     prompt: str
     prompt_id: str
+    api_key_sha256: str | None = None
+    request_url: str | None = None
+    api_version: str | None = None
+    extra_headers: Mapping[str, str] = field(default_factory=dict)
+    generation_parameters: Mapping[str, Any] = field(default_factory=dict)
     temperature: float | None = None
     max_tokens: int | None = None
     system: str | None = None
@@ -106,6 +111,16 @@ class RequestSignature:
             "prompt": self.prompt,
             "prompt_id": self.prompt_id,
         }
+        if self.api_key_sha256 is not None:
+            obj["api_key_sha256"] = self.api_key_sha256
+        if self.request_url is not None:
+            obj["request_url"] = self.request_url
+        if self.api_version is not None:
+            obj["api_version"] = self.api_version
+        if self.extra_headers:
+            obj["extra_headers"] = self.extra_headers
+        if self.generation_parameters:
+            obj["generation_parameters"] = self.generation_parameters
         if self.temperature is not None:
             obj["temperature"] = self.temperature
         if self.max_tokens is not None:
@@ -131,6 +146,13 @@ class RequestSignature:
             "provider": self.provider,
             "prompt_id": self.prompt_id,
             "prompt": self.prompt,
+            "api_key_sha256": self.api_key_sha256,
+            "request_url": self.request_url,
+            "api_version": self.api_version,
+            "extra_headers": dict(self.extra_headers) if self.extra_headers else {},
+            "generation_parameters": (
+                dict(self.generation_parameters) if self.generation_parameters else {}
+            ),
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "system": self.system,

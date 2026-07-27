@@ -55,6 +55,35 @@ def test_openai_compatible_completion_normalizes_response() -> None:
     assert response.request_id == "req_123"
 
 
+def test_request_signature_context_records_effective_controls_without_secrets() -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example/v1",
+            endpoint="https://gateway.example/custom/chat/completions",
+            api_key="secret",
+            model="configured-model",
+            temperature=0.2,
+            max_tokens=32,
+            extra_headers={"X-Gateway-Key": "header-secret"},
+            extra_body={"top_p": 0.9, "seed": 42, "frequency_penalty": 0.1},
+        )
+    )
+
+    context = client.request_signature_context("hello", system="be concise")
+
+    assert context["api_key_sha256"] != "secret"
+    assert context["request_url"] == "https://gateway.example/custom/chat/completions"
+    assert context["extra_headers"]["X-Gateway-Key"] != "header-secret"
+    assert context["generation_parameters"] == {
+        "temperature": 0.2,
+        "max_tokens": 32,
+        "top_p": 0.9,
+        "seed": 42,
+        "frequency_penalty": 0.1,
+    }
+
+
 @respx.mock
 def test_cache_buster_uses_a_unique_url_parameter_without_changing_the_body() -> None:
     route = respx.post(

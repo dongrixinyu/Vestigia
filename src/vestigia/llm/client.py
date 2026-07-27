@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import uuid4
@@ -34,6 +35,45 @@ class LLMClient:
         """Close the internally-created HTTP client, if any."""
         if self._owns_http_client:
             self._http_client.close()
+
+    def request_signature_context(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        """Return the effective, non-secret request fields used in a signature.
+
+        The API key and values of user-supplied headers are represented by
+        SHA-256 digests, so JSONL signature records remain safe to share.
+        """
+        messages: list[Message] = [{"role": "user", "content": prompt}]
+        if self.config.provider == "openai_compatible":
+            payload = self._openai_payload(messages, system, temperature, max_tokens)
+        elif self.config.provider == "anthropic":
+            payload = self._anthropic_payload(messages, system, temperature, max_tokens)
+        else:
+            raise ValueError(f"unsupported provider: {self.config.provider!r}")
+        return {
+            "request_model": str(payload["model"]),
+            "api_key_sha256": _sha256(self.config.api_key),
+            "request_url": self._endpoint(
+                "chat/completions" if self.config.provider == "openai_compatible" else "messages"
+            ),
+            "api_version": (
+                self.config.api_version if self.config.provider == "anthropic" else None
+            ),
+            "extra_headers": {
+                name: _sha256(value) for name, value in sorted(self.config.extra_headers.items())
+            },
+            "generation_parameters": {
+                name: value
+                for name, value in payload.items()
+                if name not in {"model", "messages", "system", "stream"}
+            },
+        }
 
     def complete(
         self,
@@ -242,6 +282,12 @@ class LLMClient:
         if not isinstance(data, Mapping):
             raise LLMRequestError("LLM endpoint returned a non-object JSON response")
         return data
+
+
+
+def _sha256(value: str) -> str:
+    """Hash a sensitive request value before it enters a persisted signature."""
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def _content_to_text(content: Any) -> str:

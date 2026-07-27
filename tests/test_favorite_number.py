@@ -46,3 +46,4 @@ def test_favorite_number_checker_rejects_response_without_number() -> None:
 
     assert parsed["numbers"] == []
     assert not PROMPT.checker("我没有特别偏好的数字。", parsed)
+

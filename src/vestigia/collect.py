@@ -174,8 +174,9 @@ def run(args: argparse.Namespace) -> int:
     records: list[dict[str, Any]] = []
     with LLMClient(config) as client, args.output.open("w", encoding="utf-8") as output:
         for index, (prompt, template) in enumerate(prompt_sequence, start=1):
+            signature_context = client.request_signature_context(prompt, system=args.system)
             signature = RequestSignature(
-                model=config.model,
+                model=str(signature_context.pop("request_model")),
                 provider=config.provider,
                 prompt=prompt,
                 prompt_id=template.id,
@@ -185,6 +186,7 @@ def run(args: argparse.Namespace) -> int:
                 extra_body=config.extra_body,
                 disable_response_cache=config.disable_response_cache,
                 cache_bust_query_param=config.cache_bust_query_param,
+                **signature_context,
             )
             try:
                 response = client.complete(prompt, system=args.system)

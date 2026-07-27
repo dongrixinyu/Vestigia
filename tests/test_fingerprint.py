@@ -36,6 +36,7 @@ def test_build_fingerprint_counts_values_per_identical_request_signature() -> No
     records.append({"status": "error"})
 
     fingerprint = build_fingerprint(records, field="parsed.first_number.value")
+    print(fingerprint)
 
     assert fingerprint["format"] == "vestigia.empirical-fingerprint.v1"
     summary = fingerprint["fingerprints"][0]
