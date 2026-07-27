@@ -8,10 +8,10 @@ from vestigia.fingerprint import build_fingerprint
 def test_build_fingerprint_counts_values_per_identical_request_signature() -> None:
     signature = {
         "digest": "same-request",
-        "model": "example-model",
+        "model": "claude-sonnet-4-6-example",
         "provider": "openai_compatible",
         "prompt_id": "favorite_number",
-        "prompt": "Pick a number.",
+        "prompt": "Pick a number range 0~100.",
         "temperature": 0.1,
         "max_tokens": 32,
         "system": None,
