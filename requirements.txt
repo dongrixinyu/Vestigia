@@ -1,2 +1,2 @@
-# Runtime dependencies
-litellm>=1.63,<2
+# Install Vestigia and its runtime dependencies declared in pyproject.toml.
+.

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from vestigia.identify import ModelFingerprint
-from vestigia.workflow import load_fingerprint, save_fingerprint
+from vestigia.workflow import _select_prompt, load_fingerprint, save_fingerprint
+from vestigia.prompts.favorite_number import PROMPT as FAVORITE_NUMBER
 
 
 def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path) -> None:
@@ -23,5 +24,30 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
 
     save_fingerprint(fingerprint, output)
     loaded = load_fingerprint(output)
-
     assert loaded == fingerprint
+
+
+def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:
+    prompt, parser = _select_prompt(
+        prompt=None,
+        prompt_id="favorite_number",
+        variant_index=0,
+        parser=None,
+    )
+
+    assert prompt == FAVORITE_NUMBER.variants[0]
+    assert parser is FAVORITE_NUMBER.parser
+
+
+def test_select_prompt_requires_one_source_and_valid_variant() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="exactly one"):
+        _select_prompt(prompt=None, prompt_id=None, variant_index=0, parser=None)
+    with pytest.raises(ValueError, match="out of range"):
+        _select_prompt(
+            prompt=None,
+            prompt_id="favorite_number",
+            variant_index=len(FAVORITE_NUMBER.variants),
+            parser=None,
+        )

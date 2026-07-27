@@ -15,6 +15,7 @@ from vestigia.identify import (
     test_model_against_fingerprint,
 )
 from vestigia.llm import LLMClient, LLMConfig
+from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
 
 
 def text_parser(text: str) -> dict[str, str]:
@@ -27,7 +28,9 @@ def create_fingerprint(
     base_url: str,
     api_key: str,
     model: str,
-    prompt: str,
+    prompt: str | None = None,
+    prompt_id: str | None = None,
+    variant_index: int = 0,
     output: str | Path | None = None,
     provider: str = "openai_compatible",
     endpoint: str | None = None,
@@ -42,21 +45,36 @@ def create_fingerprint(
     reasoning_effort: str | None = None,
     extra_body: Mapping[str, Any] | None = None,
     extra_headers: Mapping[str, str] | None = None,
-    parser: Parser = text_parser,
-    field: str = "parsed.text",
+    parser: Parser | None = None,
+    field: str | None = None,
     count: int = 50,
     subset_size: int = 20,
     resamples: int = 1_000,
     seed: int | None = 0,
 ) -> ModelFingerprint:
-    """Call one endpoint repeatedly and optionally save its stable distribution.
+    """Sample one prompt repeatedly and optionally save its response distribution.
 
-    ``base_url``, ``api_key`` and ``model`` are the only required connection
-    values. Sampling controls accepted by the target API belong in
-    ``temperature``, ``max_tokens`` and ``extra_body``. The saved JSON can be
-    passed directly to :func:`verify_fingerprint` after loading with
-    :func:`load_fingerprint`.
+    Pass ``prompt_id`` to select a built-in probe from :mod:`vestigia.prompts`.
+    Its parser is used automatically, so the returned fingerprint's
+    ``distribution`` is built from the probe's structured parsed result. Use
+    ``variant_index`` to select a fixed wording from that probe. Alternatively,
+    pass a custom ``prompt``; it defaults to :func:`text_parser` in that case.
+    Exactly one of ``prompt`` and ``prompt_id`` is required.
+
+    ``base_url``, ``api_key`` and ``model`` are the required connection values.
+    Sampling controls accepted by the target API belong in ``temperature``,
+    ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
+    :func:`verify_fingerprint` after loading with :func:`load_fingerprint`.
     """
+    selected_prompt, selected_parser = _select_prompt(
+        prompt=prompt,
+        prompt_id=prompt_id,
+        variant_index=variant_index,
+        parser=parser,
+    )
+    selected_field = field if field is not None else (
+        "parsed" if prompt_id is not None else "parsed.text"
+    )
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
         base_url=base_url,
@@ -77,10 +95,10 @@ def create_fingerprint(
     with LLMClient(config) as client:
         fingerprint = build_model_fingerprint(
             client,
-            prompt,
-            parser,
+            selected_prompt,
+            selected_parser,
             count=count,
-            field=field,
+            field=selected_field,
             system=system,
             subset_size=subset_size,
             resamples=resamples,
@@ -101,17 +119,21 @@ def verify_fingerprint(
     endpoint: str | None = None,
     extra_body: Mapping[str, Any] | None = None,
     extra_headers: Mapping[str, str] | None = None,
-    parser: Parser = text_parser,
+    parser: Parser | None = None,
     count: int = 20,
 ) -> FingerprintTestResult:
     """Repeat the reference request against another model and compare it.
 
     The reference prompt, system instruction, token limit, temperature and
-    feature field are reused automatically. ``extra_body`` must contain the
-    same sampling controls as the reference by default. Pass ``extra_body``
-    only to explicitly override them; a mismatch raises ``ValueError``.
+    feature field are reused automatically. For a fingerprint built with a
+    built-in ``prompt_id``, its parser is recovered from the prompt catalog;
+    pass ``parser`` only for a custom prompt or to override that parser.
+    ``extra_body`` must contain the same sampling controls as the reference by
+    default. Pass ``extra_body`` only to explicitly override them; a mismatch
+    raises ``ValueError``.
     """
     reference = _coerce_fingerprint(fingerprint)
+    selected_parser = parser or _parser_for_fingerprint(reference)
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
         base_url=base_url,
@@ -134,7 +156,7 @@ def verify_fingerprint(
         extra_headers=extra_headers or {},
     )
     with LLMClient(config) as client:
-        return test_model_against_fingerprint(client, reference, parser, count=count)
+        return test_model_against_fingerprint(client, reference, selected_parser, count=count)
 
 
 def save_fingerprint(fingerprint: ModelFingerprint, output: str | Path) -> None:
@@ -150,6 +172,56 @@ def load_fingerprint(input_path: str | Path) -> ModelFingerprint:
     if not isinstance(data, Mapping):
         raise ValueError("fingerprint JSON must be an object")
     return _coerce_fingerprint(data)
+
+
+def _parser_for_fingerprint(fingerprint: ModelFingerprint) -> Parser:
+    """Recover a built-in probe parser, otherwise compare custom text verbatim."""
+    matching_templates = [
+        template
+        for template in DEFAULT_PROMPTS
+        if fingerprint.prompt in template.variants
+    ]
+    if len(matching_templates) == 1:
+        return matching_templates[0].parser
+    return text_parser
+
+
+def _select_prompt(
+    *,
+    prompt: str | None,
+    prompt_id: str | None,
+    variant_index: int,
+    parser: Parser | None,
+) -> tuple[str, Parser]:
+    """Resolve either a custom prompt or one fixed wording from the probe set."""
+    if (prompt is None) == (prompt_id is None):
+        raise ValueError("pass exactly one of prompt or prompt_id")
+    if variant_index < 0:
+        raise ValueError("variant_index must not be negative")
+
+    if prompt is not None:
+        if not prompt:
+            raise ValueError("prompt must not be empty")
+        return prompt, parser or text_parser
+
+    template = _prompt_template(prompt_id)
+    try:
+        selected_prompt = template.variants[variant_index]
+    except IndexError as error:
+        raise ValueError(
+            f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
+            f"choose 0 through {len(template.variants) - 1}"
+        ) from error
+    return selected_prompt, parser or template.parser
+
+
+def _prompt_template(prompt_id: str | None) -> PromptTemplate:
+    """Return a built-in probe by its stable identifier."""
+    for template in DEFAULT_PROMPTS:
+        if template.id == prompt_id:
+            return template
+    available = ", ".join(template.id for template in DEFAULT_PROMPTS)
+    raise ValueError(f"unknown prompt_id {prompt_id!r}; available prompt IDs: {available}")
 
 
 def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFingerprint:

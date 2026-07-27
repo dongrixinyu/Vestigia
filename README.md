@@ -233,17 +233,19 @@ vestigia-validate \
 
 ### Python API：一站式采集、保存和复测
 
-如果只需要提供 URL、API Key、模型名和一个 prompt，可直接使用封装工作流；不需要自己创建 `LLMClient`、调用循环或处理 JSON：
+如果只需要提供 URL、API Key 和模型名，可直接使用封装工作流；指定内置 `prompt_id` 后，工作流会从 `vestigia.prompts` 选择固定题目、自动使用该题目的 parser，并以同一措辞连续调用来建立分布。不需要自己创建 `LLMClient`、编写调用循环或处理 JSON：
 
 ```python
 from vestigia import create_fingerprint, load_fingerprint, verify_fingerprint
 
-# 对参考模型重复调用 50 次，计算分布并持久化为 JSON。
+# 从内置题库选 favorite_number 的第一个固定措辞，连续调用 50 次，
+# 用该题目的 parser 统计分布并持久化为 JSON。
 reference = create_fingerprint(
     base_url="https://gateway.example.com/v1",
     api_key="reference-api-key",
     model="reference-model",
-    prompt="只回答你最喜欢的一个数字。",
+    prompt_id="favorite_number",
+    variant_index=0,
     output="fingerprints/reference.json",
     temperature=0.1,
     max_tokens=64,
@@ -262,7 +264,9 @@ result = verify_fingerprint(
 print(result.matches_reference)
 ```
 
-默认用完整回答文本建立经验分布。对于数字、分类等可提取稳定特征的题目，传入 `parser` 和 `field`，例如 `parser=vestigia.prompts.favorite_number.parse`、`field="parsed.first_number.value"`。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+默认对自定义 `prompt` 用完整回答文本建立经验分布。指定 `prompt_id` 时会自动使用相应内置 probe 的 parser，默认 `field="parsed"` 会统计整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+
+完整的“采样 → 保存 → 加载 → 比较”可直接运行 `examples/fingerprint_and_compare.py`。它只调用 `create_fingerprint`、`load_fingerprint` 和 `verify_fingerprint`；通过环境变量配置两端模型连接信息，内置选择 `favorite_number` 探针并输出完整比较报告。
 
 ### Python API：建立基准并测试待测模型
 
