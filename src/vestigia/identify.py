@@ -90,7 +90,8 @@ def build_model_fingerprint(
     """Call a model repeatedly and build exactly one selected feature distribution."""
     _validate_count(count, "count")
     _validate_feature_kind(feature_kind)
-    request_configuration = _request_configuration(client, temperature=temperature, max_tokens=max_tokens)
+    request_configuration = _request_configuration(
+        client, temperature=temperature, max_tokens=max_tokens)
     values, raw_lengths = _collect_feature_values(
         client,
         prompt,

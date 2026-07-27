@@ -20,7 +20,7 @@ from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
 
 def text_parser(content: str) -> dict[str, str]:
     """Default feature parser: compare the complete response text."""
-    return {"text": text}
+    return {"text": content}
 
 
 def create_fingerprint(
