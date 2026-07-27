@@ -164,7 +164,12 @@ class LLMClient:
         try:
             choice = raw["choices"][0]
             message = choice["message"]
-            text = _content_to_text(message["content"])
+            text = message.get("content") or ""
+            reasoning_content = message.get("reasoning_content")
+            if not isinstance(text, str):
+                raise ValueError("response content is not text")
+            if reasoning_content is not None and not isinstance(reasoning_content, str):
+                raise ValueError("response reasoning_content is not text")
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise LLMRequestError("LiteLLM returned an invalid completion response") from exc
         return LLMResponse(
@@ -175,7 +180,7 @@ class LLMClient:
             usage=raw.get("usage"),
             request_id=raw.get("id") or raw.get("_hidden_params", {}).get("request_id"),
             raw=raw,
-            reasoning_content=_reasoning_content_to_text(message.get("reasoning_content")),
+            reasoning_content=reasoning_content,
         )
 
 
@@ -195,18 +200,3 @@ def _as_mapping(value: Any) -> Mapping[str, Any]:
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
-
-
-def _reasoning_content_to_text(content: Any) -> str | None:
-    """Normalize optional reasoning output exposed by compatible gateways."""
-    if content is None:
-        return None
-    return _content_to_text(content)
-
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            str(block.get("text", "")) if isinstance(block, Mapping) else str(block) for block in content
-        )
-    raise ValueError("response content is neither text nor content blocks")

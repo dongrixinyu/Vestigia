@@ -48,7 +48,7 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
 
 
 @patch("vestigia.llm.client.litellm.completion")
-def test_client_preserves_reasoning_content_separately_from_final_text(completion) -> None:
+def test_client_preserves_litellm_reasoning_content_separately_from_final_text(completion) -> None:
     completion.return_value = {
         "choices": [{
             "message": {"content": "42", "reasoning_content": "reasoning trace"},
@@ -60,7 +60,7 @@ def test_client_preserves_reasoning_content_separately_from_final_text(completio
             provider="openai_compatible",
             base_url="https://gateway.example/v1",
             api_key="secret",
-            model="deepseek-reasoner",
+            model="reasoning-model",
         )
     )
 

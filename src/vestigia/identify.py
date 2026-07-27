@@ -269,12 +269,19 @@ def _collect_values(
             prompt, system=system, temperature=temperature, max_tokens=max_tokens
         )
         parsed = parser(response.text)
-        values.append(canonical_value(resolve_field({"parsed": parsed}, field)))
+        feature_value = resolve_field({"parsed": parsed}, field)
+        values.append(_distribution_value(feature_value))
         text_lengths.append(len(_length_text(response, length_source)))
     return values, text_lengths
 
 
-def _length_text(response: LLMResponse, source: str) -> str:
+def _distribution_value(value: Any) -> str:
+    """Make a readable distribution key without JSON-quoting string features."""
+    if isinstance(value, str):
+        return value
+    return canonical_value(value)
+
+
     """Return the configured response component used for length features."""
     if source == "text":
         return response.text

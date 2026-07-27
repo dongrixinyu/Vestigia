@@ -53,7 +53,7 @@ def test_public_api_builds_reference_then_accepts_matching_candidate() -> None:
     assert fingerprint.stability["reliable"] is True
     assert fingerprint.text_length["statistics"]["mean"] == 2.0
     assert fingerprint.text_length["bucket_scheme"] == "power_of_two_characters"
-    assert fingerprint.distribution == {'"76"': 1.0}
+    assert fingerprint.distribution == {"76": 1.0}
     assert fingerprint.request_configuration["model"] == "claude-reference"
     assert fingerprint.request_configuration["temperature"] == 0.1
     assert fingerprint.request_configuration["extra_body"] == {}
@@ -67,7 +67,20 @@ def test_public_api_builds_reference_then_accepts_matching_candidate() -> None:
     }
 
 
-def test_public_api_rejects_a_different_output_distribution() -> None:
+def test_string_feature_values_are_not_json_quoted() -> None:
+    fingerprint = build_model_fingerprint(
+        FakeClient("reference", ["137"] * 2),
+        "Pick a favorite number.",
+        parse_number,
+        field="parsed.value",
+        count=2,
+        subset_size=1,
+        resamples=1,
+    )
+
+    assert fingerprint.values == ("137", "137")
+    assert fingerprint.distribution == {"137": 1.0}
+
     fingerprint = build_model_fingerprint(
         FakeClient("claude-reference", ["76"] * 50),
         "Pick a favorite number.",
