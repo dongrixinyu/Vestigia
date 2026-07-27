@@ -81,6 +81,7 @@ class LLMResponse:
     usage: Mapping[str, Any] | None
     request_id: str | None
     raw: Mapping[str, Any]
+    reasoning_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

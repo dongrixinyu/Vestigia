@@ -28,8 +28,7 @@ def create_fingerprint(
     base_url: str,
     api_key: str,
     model: str,
-    prompt: str | None = None,
-    prompt_id: str | None = None,
+    prompt_id: str,
     variant_index: int = 0,
     output: str | Path | None = None,
     provider: str = "openai_compatible",
@@ -52,29 +51,25 @@ def create_fingerprint(
     resamples: int = 1_000,
     seed: int | None = 0,
 ) -> ModelFingerprint:
-    """Sample one prompt repeatedly and optionally save its response distribution.
+    """Sample one built-in probe repeatedly and save its response distribution.
 
-    Pass ``prompt_id`` to select a built-in probe from :mod:`vestigia.prompts`.
-    Its parser is used automatically, so the returned fingerprint's
-    ``distribution`` is built from the probe's structured parsed result. Use
-    ``variant_index`` to select a fixed wording from that probe. Alternatively,
-    pass a custom ``prompt``; it defaults to :func:`text_parser` in that case.
-    Exactly one of ``prompt`` and ``prompt_id`` is required.
+    ``prompt_id`` selects a probe from :mod:`vestigia.prompts`; arbitrary prompt
+    text is deliberately not accepted. ``variant_index`` selects one fixed
+    wording from that probe, which is then used for every one of the ``count``
+    calls. The probe's parser is used automatically unless explicitly
+    overridden.
 
     ``base_url``, ``api_key`` and ``model`` are the required connection values.
     Sampling controls accepted by the target API belong in ``temperature``,
     ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
     :func:`verify_fingerprint` after loading with :func:`load_fingerprint`.
     """
-    selected_prompt, selected_parser = _select_prompt(
-        prompt=prompt,
+    selected_prompt, selected_parser, length_source = _select_prompt(
         prompt_id=prompt_id,
         variant_index=variant_index,
         parser=parser,
     )
-    selected_field = field if field is not None else (
-        "parsed" if prompt_id is not None else "parsed.text"
-    )
+    selected_field = field or "parsed"
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
         base_url=base_url,
@@ -103,6 +98,7 @@ def create_fingerprint(
             subset_size=subset_size,
             resamples=resamples,
             seed=seed,
+            length_source=length_source,
         )
     if output is not None:
         save_fingerprint(fingerprint, output)
@@ -125,10 +121,9 @@ def verify_fingerprint(
     """Repeat the reference request against another model and compare it.
 
     The reference prompt, system instruction, token limit, temperature and
-    feature field are reused automatically. For a fingerprint built with a
-    built-in ``prompt_id``, its parser is recovered from the prompt catalog;
-    pass ``parser`` only for a custom prompt or to override that parser.
-    ``extra_body`` must contain the same sampling controls as the reference by
+    feature field are reused automatically. The probe parser is recovered from
+    the built-in prompt catalog; pass ``parser`` only to explicitly override
+    it. ``extra_body`` must contain the same sampling controls as the reference
     default. Pass ``extra_body`` only to explicitly override them; a mismatch
     raises ``ValueError``.
     """
@@ -175,34 +170,29 @@ def load_fingerprint(input_path: str | Path) -> ModelFingerprint:
 
 
 def _parser_for_fingerprint(fingerprint: ModelFingerprint) -> Parser:
-    """Recover a built-in probe parser, otherwise compare custom text verbatim."""
+    """Recover the parser for the built-in probe used by a fingerprint."""
     matching_templates = [
         template
         for template in DEFAULT_PROMPTS
         if fingerprint.prompt in template.variants
     ]
-    if len(matching_templates) == 1:
-        return matching_templates[0].parser
-    return text_parser
+    if len(matching_templates) != 1:
+        raise ValueError(
+            "fingerprint prompt is not uniquely represented in the built-in prompt catalog; "
+            "pass parser explicitly"
+        )
+    return matching_templates[0].parser
 
 
 def _select_prompt(
     *,
-    prompt: str | None,
-    prompt_id: str | None,
+    prompt_id: str,
     variant_index: int,
     parser: Parser | None,
-) -> tuple[str, Parser]:
-    """Resolve either a custom prompt or one fixed wording from the probe set."""
-    if (prompt is None) == (prompt_id is None):
-        raise ValueError("pass exactly one of prompt or prompt_id")
+) -> tuple[str, Parser, str]:
+    """Resolve one fixed wording and parser from the built-in probe catalog."""
     if variant_index < 0:
         raise ValueError("variant_index must not be negative")
-
-    if prompt is not None:
-        if not prompt:
-            raise ValueError("prompt must not be empty")
-        return prompt, parser or text_parser
 
     template = _prompt_template(prompt_id)
     try:
@@ -212,10 +202,10 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, parser or template.parser
+    return selected_prompt, parser or template.parser, template.length_source
 
 
-def _prompt_template(prompt_id: str | None) -> PromptTemplate:
+def _prompt_template(prompt_id: str) -> PromptTemplate:
     """Return a built-in probe by its stable identifier."""
     for template in DEFAULT_PROMPTS:
         if template.id == prompt_id:
@@ -229,7 +219,7 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         return value
     required = {
         "model", "provider", "prompt", "system", "temperature", "max_tokens",
-        "request_configuration", "field", "values", "distribution", "text_length", "stability",
+        "request_configuration", "field", "values", "distribution", "text_length", "stability", "length_source",
     }
     missing = required - value.keys()
     if missing:
@@ -247,4 +237,5 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         distribution=dict(value["distribution"]),
         text_length=dict(value["text_length"]),
         stability=dict(value["stability"]),
+        length_source=str(value["length_source"]),
     )

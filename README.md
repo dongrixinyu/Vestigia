@@ -264,9 +264,9 @@ result = verify_fingerprint(
 print(result.matches_reference)
 ```
 
-默认对自定义 `prompt` 用完整回答文本建立经验分布。指定 `prompt_id` 时会自动使用相应内置 probe 的 parser，默认 `field="parsed"` 会统计整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+默认 `field="parsed"` 会统计内置 probe 的整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。题目只能通过 `prompt_id` 从内置题库选择，不能传入任意 prompt 文本。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
 
-完整的“采样 → 保存 → 加载 → 比较”可直接运行 `examples/fingerprint_and_compare.py`。它只调用 `create_fingerprint`、`load_fingerprint` 和 `verify_fingerprint`；通过环境变量配置两端模型连接信息，内置选择 `favorite_number` 探针并输出完整比较报告。
+完整的“采样 → 保存 → 加载 → 比较”可直接运行 `examples/fingerprint_and_compare.py`。它只调用 `create_fingerprint`、`load_fingerprint` 和 `verify_fingerprint`；在文件顶部填写两端模型的 `LLM_*` / `CANDIDATE_LLM_*` 连接变量，内置选择 `favorite_number` 探针并输出完整比较报告。
 
 ### Python API：建立基准并测试待测模型
 
@@ -315,7 +315,7 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。它还会将每次 `response.text` 的原始 Unicode 字符数（**包含空白、标点和换行**）作为第二项特征，但不统计每一个精确长度：长度会按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
+`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。长度特征由各 probe 决定：通常统计每次 `response.text` 的原始 Unicode 字符数（**包含空白、标点和换行**）；`favorite_number` 则统计网关返回的 `reasoning_content` 长度。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
 
 `test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 

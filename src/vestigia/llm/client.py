@@ -175,6 +175,7 @@ class LLMClient:
             usage=raw.get("usage"),
             request_id=raw.get("id") or raw.get("_hidden_params", {}).get("request_id"),
             raw=raw,
+            reasoning_content=_reasoning_content_to_text(message.get("reasoning_content")),
         )
 
 
@@ -196,7 +197,12 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _content_to_text(content: Any) -> str:
+def _reasoning_content_to_text(content: Any) -> str | None:
+    """Normalize optional reasoning output exposed by compatible gateways."""
+    if content is None:
+        return None
+    return _content_to_text(content)
+
     if isinstance(content, str):
         return content
     if isinstance(content, list):

@@ -37,6 +37,7 @@ class ModelFingerprint:
     distribution: Mapping[str, float]
     text_length: Mapping[str, Any]
     stability: Mapping[str, Any]
+    length_source: str = "text"
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable representation of the fingerprint."""
@@ -78,6 +79,7 @@ def build_model_fingerprint(
     seed: int | None = 0,
     max_p95_tv_distance: float = 0.20,
     max_p95_length_tv_distance: float = 0.20,
+    length_source: str = "text",
 ) -> ModelFingerprint:
     """Call a model repeatedly and build distribution and text-length features.
 
@@ -85,6 +87,7 @@ def build_model_fingerprint(
     whitespace and punctuation are included so the metric stays deterministic.
     """
     _validate_count(count, "count")
+    _validate_length_source(length_source)
     request_configuration = _request_configuration(
         client, temperature=temperature, max_tokens=max_tokens
     )
@@ -97,6 +100,7 @@ def build_model_fingerprint(
         temperature=temperature,
         max_tokens=max_tokens,
         field=field,
+        length_source=length_source,
     )
     stability = validate_stability(
         values,
@@ -105,13 +109,16 @@ def build_model_fingerprint(
         seed=seed,
         max_p95_tv_distance=max_p95_tv_distance,
     )
-    text_length = validate_length_distribution(
-        text_lengths,
-        sample_size=subset_size,
-        resamples=resamples,
-        seed=seed,
-        max_p95_tv_distance=max_p95_length_tv_distance,
-    )
+    text_length = {
+        **validate_length_distribution(
+            text_lengths,
+            sample_size=subset_size,
+            resamples=resamples,
+            seed=seed,
+            max_p95_tv_distance=max_p95_length_tv_distance,
+        ),
+        "source": length_source,
+    }
     return ModelFingerprint(
         model=client.config.model,
         provider=client.config.provider,
@@ -125,6 +132,7 @@ def build_model_fingerprint(
         distribution=distribution(values),
         text_length=text_length,
         stability=stability,
+        length_source=length_source,
     )
 
 
@@ -163,6 +171,7 @@ def test_model_against_fingerprint(
         temperature=fingerprint.temperature,
         max_tokens=fingerprint.max_tokens,
         field=fingerprint.field,
+        length_source=fingerprint.length_source,
     )
     distances = compare_distributions(fingerprint.values, values)
     acceptance = float(fingerprint.stability["total_variation_distance"]["p95"])
@@ -181,6 +190,7 @@ def test_model_against_fingerprint(
     )
     length_result = {
         **candidate_length,
+        "source": fingerprint.length_source,
         "bucket_scheme": fingerprint.text_length["bucket_scheme"],
         "distribution": candidate_length_buckets,
         "distances": length_distances,
@@ -250,6 +260,7 @@ def _collect_values(
     temperature: float | None,
     max_tokens: int | None,
     field: str,
+    length_source: str,
 ) -> tuple[list[str], list[int]]:
     values: list[str] = []
     text_lengths: list[int] = []
@@ -259,8 +270,22 @@ def _collect_values(
         )
         parsed = parser(response.text)
         values.append(canonical_value(resolve_field({"parsed": parsed}, field)))
-        text_lengths.append(len(response.text))
+        text_lengths.append(len(_length_text(response, length_source)))
     return values, text_lengths
+
+
+def _length_text(response: LLMResponse, source: str) -> str:
+    """Return the configured response component used for length features."""
+    if source == "text":
+        return response.text
+    if source == "reasoning_content":
+        return response.reasoning_content or ""
+    raise ValueError(f"unsupported length source: {source}")
+
+
+def _validate_length_source(value: str) -> None:
+    if value not in {"text", "reasoning_content"}:
+        raise ValueError("length_source must be 'text' or 'reasoning_content'")
 
 
 def _validate_count(value: int, name: str) -> None:

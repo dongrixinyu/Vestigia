@@ -42,12 +42,33 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
         max_tokens=32,
     )
     assert response.text == "final answer"
+    assert response.reasoning_content is None
     assert response.model == "gateway-model"
     assert response.request_id == "chatcmpl_123"
 
 
 @patch("vestigia.llm.client.litellm.completion")
-def test_client_routes_anthropic_request_through_litellm(completion) -> None:
+def test_client_preserves_reasoning_content_separately_from_final_text(completion) -> None:
+    completion.return_value = {
+        "choices": [{
+            "message": {"content": "42", "reasoning_content": "reasoning trace"},
+            "finish_reason": "stop",
+        }],
+    }
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example/v1",
+            api_key="secret",
+            model="deepseek-reasoner",
+        )
+    )
+
+    response = client.complete("hello")
+
+    assert response.text == "42"
+    assert response.reasoning_content == "reasoning trace"
+
     completion.return_value = {
         "id": "msg_123",
         "model": "claude-test",

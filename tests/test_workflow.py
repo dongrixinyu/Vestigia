@@ -19,6 +19,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
         distribution={'"yes"': 1.0},
         text_length={"stability": {"reliable": True}},
         stability={"reliable": True},
+        length_source="text",
     )
     output = tmp_path / "reference-fingerprint.json"
 
@@ -28,8 +29,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
 
 
 def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:
-    prompt, parser = _select_prompt(
-        prompt=None,
+    prompt, parser, length_source = _select_prompt(
         prompt_id="favorite_number",
         variant_index=0,
         parser=None,
@@ -37,16 +37,14 @@ def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:
 
     assert prompt == FAVORITE_NUMBER.variants[0]
     assert parser is FAVORITE_NUMBER.parser
+    assert length_source == "reasoning_content"
 
 
-def test_select_prompt_requires_one_source_and_valid_variant() -> None:
+def test_select_prompt_rejects_an_invalid_variant() -> None:
     import pytest
 
-    with pytest.raises(ValueError, match="exactly one"):
-        _select_prompt(prompt=None, prompt_id=None, variant_index=0, parser=None)
     with pytest.raises(ValueError, match="out of range"):
         _select_prompt(
-            prompt=None,
             prompt_id="favorite_number",
             variant_index=len(FAVORITE_NUMBER.variants),
             parser=None,

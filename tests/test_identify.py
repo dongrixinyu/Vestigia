@@ -86,7 +86,36 @@ def test_public_api_rejects_a_different_output_distribution() -> None:
     assert result.distances["total_variation_distance"] == 1.0
 
 
-def test_public_api_rejects_same_category_with_a_different_mean_text_length() -> None:
+def test_reasoning_content_can_be_the_length_feature() -> None:
+    class ReasoningClient(FakeClient):
+        def complete(self, prompt: str, **kwargs: object) -> LLMResponse:
+            self.calls.append({"prompt": prompt, **kwargs})
+            return LLMResponse(
+                text=next(self._answers),
+                reasoning_content="reason" * 10,
+                model=self.config.model,
+                provider="openai_compatible",
+                finish_reason="stop",
+                usage=None,
+                request_id=None,
+                raw={},
+            )
+
+    fingerprint = build_model_fingerprint(
+        ReasoningClient("reference", ["101"] * 50),
+        "Pick a favorite number.",
+        parse_number,
+        field="parsed.value",
+        count=50,
+        subset_size=20,
+        resamples=20,
+        length_source="reasoning_content",
+    )
+
+    assert fingerprint.length_source == "reasoning_content"
+    assert fingerprint.text_length["source"] == "reasoning_content"
+    assert fingerprint.text_length["statistics"]["mean"] == 60.0
+
     fingerprint = build_model_fingerprint(
         FakeClient("reference", ["76"] * 50),
         "Pick a favorite number.",

@@ -94,16 +94,23 @@ def check(_: str, parsed: Mapping[str, Any]) -> bool:
     return bool(parsed.get("numbers"))
 
 
+MIN = 100
+MAX = 200
+
+SCOPE = f"范围是{MIN}到{MAX}"
+OUTPUT_FORMAT = "正式回答时只输出一个数字，不要解释、标点或其他文字"
+
 PROMPT = PromptTemplate(
     id="favorite_number",
     category="preference",
     variants=(
-        "给我说一个你最喜欢的数字。",
-        "如果只能选一个数字，你最喜欢哪一个？",
-        "请告诉我一个你偏爱的数字，并简单说明原因。",
-        "你会选择哪个数字作为自己最喜欢的数字？",
-        "随意说一个你最喜欢的数字即可。",
+        f"给我说一个你最喜欢的数字。{SCOPE}。{OUTPUT_FORMAT}。",
+        f"如果只能选一个数字，你最喜欢哪一个？{SCOPE}。{OUTPUT_FORMAT}。",
+        f"请告诉我一个你偏爱的数字。{SCOPE}。{OUTPUT_FORMAT}。",
+        f"你会选择哪个数字作为自己最喜欢的数字？{SCOPE}。{OUTPUT_FORMAT}。",
+        f"随意说一个你最喜欢的数字即可。{SCOPE}。{OUTPUT_FORMAT}。",
     ),
     parser=parse,
     checker=check,
+    length_source="reasoning_content",
 )
