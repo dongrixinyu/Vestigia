@@ -164,16 +164,16 @@ class LLMClient:
         try:
             choice = raw["choices"][0]
             message = choice["message"]
-            text = message.get("content") or ""
+            content = message.get("content") or ""
             reasoning_content = message.get("reasoning_content")
-            if not isinstance(text, str):
+            if not isinstance(content, str):
                 raise ValueError("response content is not text")
             if reasoning_content is not None and not isinstance(reasoning_content, str):
                 raise ValueError("response reasoning_content is not text")
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise LLMRequestError("LiteLLM returned an invalid completion response") from exc
         return LLMResponse(
-            text=text,
+            content=content,
             model=str(raw.get("model", self.config.model)),
             provider=self.config.provider,
             finish_reason=choice.get("finish_reason"),

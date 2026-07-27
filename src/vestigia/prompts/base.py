@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-LengthSource = Literal["text", "reasoning_content"]
+LengthField = Literal["content", "reasoning_content"]
 
 Parser = Callable[[str], Mapping[str, Any]]
 Checker = Callable[[str, Mapping[str, Any]], bool]
@@ -21,12 +21,12 @@ class PromptTemplate:
     variants: tuple[str, ...]
     parser: Parser
     checker: Checker
-    length_source: LengthSource = "text"
+    length_field: LengthField = "content"
 
 
-def nonempty_text_parser(text: str) -> dict[str, Any]:
+def nonempty_text_parser(content: str) -> dict[str, Any]:
     """Extract normalized text for open-ended probes."""
-    normalized = " ".join(text.split())
+    normalized = " ".join(content.split())
     return {"text": normalized, "length": len(normalized)}
 
 

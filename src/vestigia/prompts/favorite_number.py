@@ -112,5 +112,5 @@ PROMPT = PromptTemplate(
     ),
     parser=parse,
     checker=check,
-    length_source="reasoning_content",
+    length_field="reasoning_content",
 )

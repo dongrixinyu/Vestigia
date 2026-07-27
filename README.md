@@ -47,7 +47,7 @@ client = LLMClient(LLMConfig(
 ))
 
 response = client.complete("用一句话解释什么是模型指纹。")
-print(response.text)
+print(response.content)
 print(response.model, response.request_id)
 ```
 
@@ -76,7 +76,7 @@ client = LLMClient(LLMConfig(
     max_tokens=512,
 ))
 response = client.complete("你好")
-print(response.text)
+print(response.content)
 ```
 
 Anthropic 配置同样通过 LiteLLM 的 `anthropic/<model>` 路由调用；可通过 `api_version` 修改版本，或通过 `extra_headers` 增加网关要求的头。
@@ -136,7 +136,7 @@ python -m vestigia.collect \
 - `--extra-body-json '{"top_p":0.9}'`：透传额外生成参数；传入值会覆盖客户端生成的同名请求字段。
 - `--fail-fast`：默认失败仍记录错误并继续；该选项使其在首次失败时退出。
 
-输出为 UTF-8 JSONL（每行一个请求）。成功记录含 `prompt_id`、`category`、实际 `prompt`、`parsed`（parser 提取的结构化特征）、`check_passed`（checker 检查结果）、最终 `response.text`、服务端模型名、token 用量和请求 ID；失败记录含错误状态码及响应正文，方便后续清洗或重试。
+输出为 UTF-8 JSONL（每行一个请求）。成功记录含 `prompt_id`、`category`、实际 `prompt`、`parsed`（parser 提取的结构化特征）、`check_passed`（checker 检查结果）、最终 `response.content`、服务端模型名、token 用量和请求 ID；失败记录含错误状态码及响应正文，方便后续清洗或重试。
 
 例如，要把 temperature 为 0.1 时“最喜欢的数字”题的回答分布保存为指纹，可固定**同一题目和同一措辞**重复调用：
 
@@ -315,7 +315,7 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。每个 probe 独立指定长度特征来源：`text` 统计 LiteLLM 标准化后的最终正式 `content`（`response.text`）的原始 Unicode 字符数，`reasoning_content` 则统计 LiteLLM 标准化后的推理输出通道。`favorite_number` 使用后者；其他 probe 默认使用前者。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
+`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。每个 probe 直接指定要计长的 LiteLLM 响应字段：`content` 为最终正式输出，`reasoning_content` 为推理输出。`favorite_number` 使用后者；其他 probe 默认使用前者。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
 
 `test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 
@@ -380,4 +380,4 @@ python -m pytest
 python -m ruff check .
 ```
 
-后续的提问集、特征提取和模型判别逻辑可以直接消费 `LLMResponse.text`、`model`、`usage` 与 `raw` 字段。
+后续的提问集、特征提取和模型判别逻辑可以直接消费 `LLMResponse.content`、`model`、`usage` 与 `raw` 字段。

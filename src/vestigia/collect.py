@@ -116,7 +116,7 @@ def response_record(
     response: LLMResponse,
     signature: RequestSignature,
 ) -> dict[str, Any]:
-    parsed = dict(template.parser(response.text))
+    parsed = dict(template.parser(response.content))
     return {
         "index": index,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -126,9 +126,9 @@ def response_record(
         "status": "ok",
         "request_signature": signature.to_dict(),
         "parsed": parsed,
-        "check_passed": template.checker(response.text, parsed),
+        "check_passed": template.checker(response.content, parsed),
         "response": {
-            "text": response.text,
+            "text": response.content,
             "model": response.model,
             "provider": response.provider,
             "finish_reason": response.finish_reason,

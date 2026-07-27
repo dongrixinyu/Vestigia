@@ -74,7 +74,7 @@ class LLMConfig:
 class LLMResponse:
     """Normalized final result from an LLM request."""
 
-    text: str
+    content: str
     model: str
     provider: Provider
     finish_reason: str | None

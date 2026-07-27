@@ -41,14 +41,14 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
         temperature=0.2,
         max_tokens=32,
     )
-    assert response.text == "final answer"
+    assert response.content == "final answer"
     assert response.reasoning_content is None
     assert response.model == "gateway-model"
     assert response.request_id == "chatcmpl_123"
 
 
 @patch("vestigia.llm.client.litellm.completion")
-def test_client_preserves_litellm_reasoning_content_separately_from_final_text(completion) -> None:
+def test_client_preserves_litellm_output_fields(completion) -> None:
     completion.return_value = {
         "choices": [{
             "message": {"content": "42", "reasoning_content": "reasoning trace"},
@@ -66,9 +66,12 @@ def test_client_preserves_litellm_reasoning_content_separately_from_final_text(c
 
     response = client.complete("hello")
 
-    assert response.text == "42"
+    assert response.content == "42"
     assert response.reasoning_content == "reasoning trace"
 
+
+@patch("vestigia.llm.client.litellm.completion")
+def test_client_routes_anthropic_request_through_litellm(completion) -> None:
     completion.return_value = {
         "id": "msg_123",
         "model": "claude-test",
@@ -84,7 +87,7 @@ def test_client_preserves_litellm_reasoning_content_separately_from_final_text(c
         )
     )
 
-    assert client.complete("hello").text == "hello"
+    assert client.complete("hello").content == "hello"
     assert completion.call_args.kwargs["model"] == "anthropic/claude-test"
     assert completion.call_args.kwargs["api_version"] == "2023-06-01"
 

@@ -18,7 +18,7 @@ from vestigia.llm import LLMClient, LLMConfig
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
 
 
-def text_parser(text: str) -> dict[str, str]:
+def text_parser(content: str) -> dict[str, str]:
     """Default feature parser: compare the complete response text."""
     return {"text": text}
 
@@ -64,7 +64,7 @@ def create_fingerprint(
     ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
     :func:`verify_fingerprint` after loading with :func:`load_fingerprint`.
     """
-    selected_prompt, selected_parser, length_source = _select_prompt(
+    selected_prompt, selected_parser, length_field = _select_prompt(
         prompt_id=prompt_id,
         variant_index=variant_index,
         parser=parser,
@@ -98,7 +98,7 @@ def create_fingerprint(
             subset_size=subset_size,
             resamples=resamples,
             seed=seed,
-            length_source=length_source,
+            length_field=length_field,
         )
     if output is not None:
         save_fingerprint(fingerprint, output)
@@ -202,7 +202,7 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, parser or template.parser, template.length_source
+    return selected_prompt, parser or template.parser, template.length_field
 
 
 def _prompt_template(prompt_id: str) -> PromptTemplate:
@@ -219,7 +219,7 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         return value
     required = {
         "model", "provider", "prompt", "system", "temperature", "max_tokens",
-        "request_configuration", "field", "values", "distribution", "text_length", "stability", "length_source",
+        "request_configuration", "field", "values", "distribution", "text_length", "stability", "length_field",
     }
     missing = required - value.keys()
     if missing:
@@ -237,5 +237,5 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         distribution=dict(value["distribution"]),
         text_length=dict(value["text_length"]),
         stability=dict(value["stability"]),
-        length_source=str(value["length_source"]),
+        length_field=str(value["length_field"]),
     )
