@@ -12,7 +12,7 @@
 
 因此，`model="claude...", temperature=0.1, top_p=0.9` 与同模型的 `temperature=0.7` 是**两组不同指纹**，必须分别采集、验证和比较；不能混合样本。
 
-当前版本先提供稳定的 **LLM 调用层**：支持 OpenAI Chat Completions 兼容接口（模型官网或中转站）以及 Anthropic Messages 接口；不会依赖特定厂商 SDK。
+当前版本通过 **LiteLLM** 统一调用层：所有供应商、OpenAI-compatible 中转站和 Anthropic Messages 服务均由 LiteLLM 适配；Vestigia 不直接实现或调用供应商 HTTP API。
 
 ## 安装
 
@@ -51,7 +51,7 @@ print(response.text)
 print(response.model, response.request_id)
 ```
 
-客户端会把请求发送至 `<base_url>/chat/completions`。若已传入完整接口地址，也可使用 `endpoint` 覆盖：
+客户端通过 LiteLLM 将请求路由至该服务；对于 OpenAI-compatible 配置，使用的 LiteLLM 路由为 `openai/<model>`，API base 为 `base_url`。若已传入完整接口地址，也可使用 `endpoint` 覆盖：
 
 ```python
 config = LLMConfig(
@@ -79,7 +79,7 @@ response = client.complete("你好")
 print(response.text)
 ```
 
-Anthropic 请求会发送至 `<base_url>/v1/messages`，并带上 `anthropic-version: 2023-06-01`。可通过 `api_version` 修改该版本，或通过 `extra_headers` 增加网关要求的头。
+Anthropic 配置同样通过 LiteLLM 的 `anthropic/<model>` 路由调用；可通过 `api_version` 修改版本，或通过 `extra_headers` 增加网关要求的头。
 
 ## 固定题库与批量采集
 
@@ -231,6 +231,39 @@ vestigia-validate \
 
 报告中的 `comparison.between_model.total_variation_distance` 就是两模型的分布差异。例如 Claude 的 `76` 概率约为 50%、Kimi 的 `36` 概率约为 60%，会产生明显的 TV/JS 距离。只有两边都通过稳定性检验，并且模型间 TV 距离大于两边各自的子集波动 `p95`，才会得到 `distinguishable: true`。这避免将采样噪声误判成模型差异。
 
+### Python API：一站式采集、保存和复测
+
+如果只需要提供 URL、API Key、模型名和一个 prompt，可直接使用封装工作流；不需要自己创建 `LLMClient`、调用循环或处理 JSON：
+
+```python
+from vestigia import create_fingerprint, load_fingerprint, verify_fingerprint
+
+# 对参考模型重复调用 50 次，计算分布并持久化为 JSON。
+reference = create_fingerprint(
+    base_url="https://gateway.example.com/v1",
+    api_key="reference-api-key",
+    model="reference-model",
+    prompt="只回答你最喜欢的一个数字。",
+    output="fingerprints/reference.json",
+    temperature=0.1,
+    max_tokens=64,
+    extra_body={"top_p": 0.9, "seed": 42},
+)
+
+# 可在其他进程中加载；prompt、system 和全部采样参数自动复用。
+reference = load_fingerprint("fingerprints/reference.json")
+result = verify_fingerprint(
+    reference,
+    base_url="https://other-gateway.example.com/v1",
+    api_key="candidate-api-key",
+    model="candidate-model",
+    count=20,
+)
+print(result.matches_reference)
+```
+
+默认用完整回答文本建立经验分布。对于数字、分类等可提取稳定特征的题目，传入 `parser` 和 `field`，例如 `parser=vestigia.prompts.favorite_number.parse`、`field="parsed.first_number.value"`。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+
 ### Python API：建立基准并测试待测模型
 
 除了 CLI，也可直接在代码中建立一个可验证的参考指纹，再对待测模型发起同样的请求：
@@ -308,7 +341,7 @@ for prompt, template in iter_prompts(20):
 
 ## API 说明
 
-- `LLMConfig`：连接信息和默认生成参数。`provider` 可为 `"openai_compatible"` 或 `"anthropic"`；使用 `extra_body` 透传网关支持的额外请求体字段。
+- `LLMConfig`：连接信息和默认生成参数，由 LiteLLM 统一执行；`provider` 可为 `"openai_compatible"` 或 `"anthropic"`，并映射到相应 LiteLLM 路由。使用 `extra_body` 透传网关支持的额外请求体字段。
 - `LLMClient.complete(...)`：同步、非流式地取得最终文本，返回 `LLMResponse`。
 - `LLMClient.complete_messages(...)`：当需要完整多轮 `messages` 时使用。
 - `LLMRequestError`：网络、HTTP 或响应格式异常。其 `status_code`、`response_body` 属性有助于排障。

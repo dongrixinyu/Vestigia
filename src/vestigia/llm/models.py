@@ -29,6 +29,12 @@ class LLMConfig:
     timeout: float = 60.0
     max_tokens: int | None = None
     temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    reasoning: Mapping[str, Any] | None = None
+    reasoning_effort: str | None = None
     api_version: str = "2023-06-01"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     extra_body: Mapping[str, Any] = field(default_factory=dict)
@@ -46,6 +52,20 @@ class LLMConfig:
             raise ValueError("timeout must be greater than zero")
         if self.max_tokens is not None and self.max_tokens <= 0:
             raise ValueError("max_tokens must be greater than zero")
+        if self.top_p is not None and not 0 <= self.top_p <= 1:
+            raise ValueError("top_p must be between zero and one")
+        if self.top_k is not None and self.top_k <= 0:
+            raise ValueError("top_k must be greater than zero")
+        if self.reasoning is not None and not isinstance(self.reasoning, Mapping):
+            raise ValueError("reasoning must be a mapping")
+        if self.reasoning_effort is not None and not self.reasoning_effort.strip():
+            raise ValueError("reasoning_effort must not be empty")
+        forbidden_body_fields = {"n", "stream"} & self.extra_body.keys()
+        if forbidden_body_fields:
+            raise ValueError(
+                "extra_body must not set " + ", ".join(sorted(forbidden_body_fields))
+                + "; Vestigia always makes one non-streaming completion"
+            )
         if self.cache_bust_query_param is not None and not self.cache_bust_query_param.strip():
             raise ValueError("cache_bust_query_param must not be empty")
 

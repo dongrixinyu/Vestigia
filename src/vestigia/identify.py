@@ -140,10 +140,20 @@ def test_model_against_fingerprint(
     candidate_configuration = _request_configuration(
         client, temperature=fingerprint.temperature, max_tokens=fingerprint.max_tokens
     )
-    if candidate_configuration["extra_body"] != fingerprint.request_configuration["extra_body"]:
-        raise ValueError(
-            "candidate client extra_body must match the fingerprint sampling parameters"
-        )
+    sampling_keys = (
+        "extra_body",
+        "top_p",
+        "top_k",
+        "presence_penalty",
+        "frequency_penalty",
+        "reasoning",
+        "reasoning_effort",
+    )
+    if any(
+        candidate_configuration[key] != fingerprint.request_configuration.get(key)
+        for key in sampling_keys
+    ):
+        raise ValueError("candidate sampling parameters must match the fingerprint")
     values, text_lengths = _collect_values(
         client,
         fingerprint.prompt,
@@ -214,6 +224,12 @@ def _request_configuration(
         "temperature": temperature if temperature is not None else client.config.temperature,
         "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
         "extra_body": dict(getattr(client.config, "extra_body", {})),
+        "top_p": getattr(client.config, "top_p", None),
+        "top_k": getattr(client.config, "top_k", None),
+        "presence_penalty": getattr(client.config, "presence_penalty", None),
+        "frequency_penalty": getattr(client.config, "frequency_penalty", None),
+        "reasoning": getattr(client.config, "reasoning", None),
+        "reasoning_effort": getattr(client.config, "reasoning_effort", None),
         "api_version": (
             getattr(client.config, "api_version", None)
             if client.config.provider == "anthropic"
