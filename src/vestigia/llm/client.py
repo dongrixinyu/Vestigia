@@ -8,7 +8,7 @@ from typing import Any
 
 import litellm
 
-from vestigia.llm.models import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
+from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
 
 
 class LLMClient:
