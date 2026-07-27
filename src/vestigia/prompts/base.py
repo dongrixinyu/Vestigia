@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+FeatureKind = Literal["parsed", "length"]
 LengthField = Literal["content", "reasoning_content"]
 
 Parser = Callable[[str], Mapping[str, Any]]
@@ -21,6 +22,7 @@ class PromptTemplate:
     variants: tuple[str, ...]
     parser: Parser
     checker: Checker
+    feature_kind: FeatureKind = "parsed"
     length_field: LengthField = "content"
 
 

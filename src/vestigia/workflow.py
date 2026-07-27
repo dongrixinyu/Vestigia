@@ -64,7 +64,7 @@ def create_fingerprint(
     ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
     :func:`verify_fingerprint` after loading with :func:`load_fingerprint`.
     """
-    selected_prompt, selected_parser, length_field = _select_prompt(
+    selected_prompt, selected_parser, feature_kind, length_field = _select_prompt(
         prompt_id=prompt_id,
         variant_index=variant_index,
         parser=parser,
@@ -93,6 +93,7 @@ def create_fingerprint(
             selected_prompt,
             selected_parser,
             count=count,
+            feature_kind=feature_kind,
             field=selected_field,
             system=system,
             subset_size=subset_size,
@@ -189,7 +190,7 @@ def _select_prompt(
     prompt_id: str,
     variant_index: int,
     parser: Parser | None,
-) -> tuple[str, Parser, str]:
+) -> tuple[str, Parser, str, str]:
     """Resolve one fixed wording and parser from the built-in probe catalog."""
     if variant_index < 0:
         raise ValueError("variant_index must not be negative")
@@ -202,7 +203,7 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, parser or template.parser, template.length_field
+    return selected_prompt, parser or template.parser, template.feature_kind, template.length_field
 
 
 def _prompt_template(prompt_id: str) -> PromptTemplate:
@@ -219,7 +220,7 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         return value
     required = {
         "model", "provider", "prompt", "system", "temperature", "max_tokens",
-        "request_configuration", "field", "values", "distribution", "text_length", "stability", "length_field",
+        "request_configuration", "feature_kind", "field", "length_field", "values", "distribution", "stability",
     }
     missing = required - value.keys()
     if missing:
@@ -232,10 +233,19 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         temperature=value["temperature"] if isinstance(value["temperature"], (int, float)) else None,
         max_tokens=value["max_tokens"] if isinstance(value["max_tokens"], int) else None,
         request_configuration=dict(value["request_configuration"]),
-        field=str(value["field"]),
+        feature_kind=str(value["feature_kind"]),  # type: ignore[arg-type]
+        field=str(value["field"]) if isinstance(value["field"], str) else None,
+        length_field=(
+            str(value["length_field"])
+            if isinstance(value["length_field"], str)
+            else None
+        ),
         values=tuple(str(item) for item in value["values"]),
         distribution=dict(value["distribution"]),
-        text_length=dict(value["text_length"]),
         stability=dict(value["stability"]),
-        length_field=str(value["length_field"]),
+        length_statistics=(
+            dict(value["length_statistics"])
+            if isinstance(value.get("length_statistics"), Mapping)
+            else None
+        ),
     )

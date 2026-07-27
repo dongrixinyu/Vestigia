@@ -8,7 +8,7 @@
 2. **固定输入**：完整 user prompt、system instruction、探针版本/措辞；
 3. **完整采样配置**：`temperature`、`max_tokens`，以及 `extra_body` 内的 `top_p`、`top_k`、`seed`、`frequency_penalty`、`presence_penalty` 或网关支持的其他生成参数；
 4. **缓存策略/协议版本**：响应缓存禁用策略、cache-buster 参数、Anthropic API version；
-5. **统计输出特征**：解析后的分类分布，以及按 2 的幂分桶的响应文本长度分布。
+5. **统计单一输出特征**：每个探针只选择一种：解析后的分类分布，或某个 LiteLLM 输出字段的长度分桶分布。
 
 因此，`model="claude...", temperature=0.1, top_p=0.9` 与同模型的 `temperature=0.7` 是**两组不同指纹**，必须分别采集、验证和比较；不能混合样本。
 
@@ -315,9 +315,9 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 会进行多次调用，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。它提取 `parser` 返回结果中的 `field`，并执行子集稳定性检验。每个 probe 直接指定要计长的 LiteLLM 响应字段：`content` 为最终正式输出，`reasoning_content` 为推理输出。`favorite_number` 使用后者；其他 probe 默认使用前者。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。这避免极长回答使直方图稀疏；该对数分桶分布也会以 TV 距离执行 50→20 的稳定性验证。
+`build_model_fingerprint` 每次只建立一种特征指纹，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。`feature_kind="parsed"` 提取 `parser` 返回结果中的 `field` 并建立分类分布；`feature_kind="length"` 只统计指定 LiteLLM 字段（`content` 或 `reasoning_content`）的长度桶分布，不调用 parser，也不生成分类分布。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`，并执行自身子集稳定性检验。
 
-`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但分类分布和长度分桶分布都必须落在参考样本的自身波动范围内，`matches_reference` 才为真。原始平均长度、标准差、最小值和最大值仍保留在报告中作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
+`test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但候选模型的**同一种**特征分布必须落在参考样本自身波动范围内，`matches_reference` 才为真。长度型指纹还保留平均值、标准差、最小值和最大值作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 
 数字题的典型输出片段：
 
