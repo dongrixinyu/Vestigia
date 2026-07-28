@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 import litellm
 
+from vestigia.config import NETWORK_RETRY_MAX_RETRIES
 from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -98,7 +103,7 @@ class LLMClient:
             raise ValueError("messages must not be empty")
         request = self._request_options(messages, system, temperature, max_tokens)
         try:
-            response = litellm.completion(**request)
+            response = self._completion_with_network_retries(request)
         except Exception as exc:
             status_code = getattr(exc, "status_code", None)
             response_body = getattr(exc, "response", None)
@@ -108,6 +113,32 @@ class LLMClient:
                 response_body=str(response_body) if response_body is not None else None,
             ) from exc
         return self._normalize(response)
+
+    def _completion_with_network_retries(self, request: Mapping[str, Any]) -> Any:
+        """Call LiteLLM, retrying only transient network connection failures."""
+        for retry_number in range(NETWORK_RETRY_MAX_RETRIES + 1):
+            try:
+                return litellm.completion(**request)
+            except Exception as exc:
+                if not _is_network_connection_error(exc):
+                    raise
+                if retry_number == NETWORK_RETRY_MAX_RETRIES:
+                    logger.error(
+                        "LLM network request failed after %d retries (model=%s, endpoint=%s): %s",
+                        NETWORK_RETRY_MAX_RETRIES,
+                        self.config.model,
+                        self.config.endpoint or self.config.base_url,
+                        exc,
+                    )
+                    raise
+                logger.warning(
+                    "LLM network request failed; retrying (%d/%d, model=%s): %s",
+                    retry_number + 1,
+                    NETWORK_RETRY_MAX_RETRIES,
+                    self.config.model,
+                    exc,
+                )
+        raise AssertionError("unreachable")
 
     def _request_options(
         self,
@@ -182,6 +213,39 @@ class LLMClient:
             raw=raw,
             reasoning_content=reasoning_content,
         )
+
+
+def _is_network_connection_error(exc: BaseException) -> bool:
+    """Recognize connection and timeout errors emitted by LiteLLM transports.
+
+    LiteLLM can wrap exceptions from httpx, httpcore, requests, or its own
+    exception classes, so inspect the exception chain rather than depending on
+    one optional HTTP implementation.
+    """
+    network_names = {
+        "APIConnectionError",
+        "APIConnectionTimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ConnectionError",
+        "NetworkError",
+        "PoolTimeout",
+        "ReadError",
+        "ReadTimeout",
+        "Timeout",
+        "WriteError",
+        "WriteTimeout",
+    }
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (ConnectionError, TimeoutError, OSError)):
+            return True
+        if type(current).__name__ in network_names:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

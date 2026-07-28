@@ -138,6 +138,24 @@ def test_config_rejects_multi_completion_and_stream_overrides() -> None:
         )
 
 
+@patch("vestigia.llm.client.litellm.completion", side_effect=ConnectionError("network unavailable"))
+def test_network_errors_retry_then_emit_failure_alert(completion, caplog) -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example",
+            api_key="secret",
+            model="model",
+        )
+    )
+
+    with pytest.raises(LLMRequestError, match="network unavailable"):
+        client.complete("hello")
+
+    assert completion.call_count == 6  # Initial call plus five configured retries.
+    assert "failed after 5 retries" in caplog.text
+
+
 @patch("vestigia.llm.client.litellm.completion", side_effect=RuntimeError("bad key"))
 def test_litellm_errors_are_normalized(_completion) -> None:
     client = LLMClient(
@@ -151,3 +169,4 @@ def test_litellm_errors_are_normalized(_completion) -> None:
 
     with pytest.raises(LLMRequestError, match="LiteLLM request failed: bad key"):
         client.complete("hello")
+    _completion.assert_called_once()

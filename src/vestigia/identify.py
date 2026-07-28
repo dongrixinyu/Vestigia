@@ -18,7 +18,7 @@ from vestigia.validation import (
 
 Parser = Callable[[str], Mapping[str, Any]]
 _STABILITY_SUBSET_SIZE = 20
-_STABILITY_RESAMPLES = 1_000
+_STABILITY_RESAMPLES = 1_00
 _STABILITY_SEED = 0
 _STABILITY_MAX_P95_TV_DISTANCE = 0.20
 
@@ -107,8 +107,8 @@ def build_model_fingerprint(
     )
     stability = validate_stability(
         values,
-        sample_size=min(_STABILITY_SUBSET_SIZE, len(values)),
-        resamples=_STABILITY_RESAMPLES,
+        sample_size=min(_STABILITY_SUBSET_SIZE, len(values)),  # subset_size
+        resamples=_STABILITY_RESAMPLES,  # how many subset been extracted
         seed=_STABILITY_SEED,
         max_p95_tv_distance=_STABILITY_MAX_P95_TV_DISTANCE,
     )
