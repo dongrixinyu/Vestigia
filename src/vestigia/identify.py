@@ -40,17 +40,12 @@ class ModelFingerprint:
 
     model: str
     prompt: str
-    system: str | None
-    temperature: float | None
-    max_tokens: int | None
     request_configuration: Mapping[str, Any]
     feature_kind: FeatureKind
     field: str | None
-    length_field: LengthField | None
     values: tuple[str, ...]
     distribution: Mapping[str, float]
     stability: Mapping[str, Any]
-    length_statistics: Mapping[str, float] | None = None
     started_at: str | None = None
     finished_at: str | None = None
 
@@ -66,14 +61,12 @@ class FingerprintTestResult:
     tested_model: str
     feature_kind: FeatureKind
     field: str | None
-    length_field: LengthField | None
     successful_sample_count: int
     distribution: Mapping[str, float]
     distances: Mapping[str, float]
     acceptance_tv_distance: float
     reference_reliable: bool
     matches_reference: bool
-    length_statistics: Mapping[str, float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -112,9 +105,9 @@ def build_model_fingerprint(
     _validate_count(count, "count")
     _validate_feature_kind(feature_kind)
     request_configuration = _request_configuration(
-        client, temperature=temperature, max_tokens=max_tokens)
+        client, system=system, temperature=temperature, max_tokens=max_tokens)
     started_at = _utc_timestamp()
-    values, raw_lengths = _collect_feature_values(
+    values, _ = _collect_feature_values(
         client,
         prompt,
         parser,
@@ -137,17 +130,12 @@ def build_model_fingerprint(
     return ModelFingerprint(
         model=client.config.model,
         prompt=prompt,
-        system=_effective_system_prompt(system),
-        temperature=temperature if temperature is not None else client.config.temperature,
-        max_tokens=max_tokens if max_tokens is not None else client.config.max_tokens,
         request_configuration=request_configuration,
         feature_kind=feature_kind,
         field=field if feature_kind == "parsed" else None,
-        length_field=length_field if feature_kind == "length" else None,
         values=tuple(values),
         distribution=distribution(values),
         stability=stability,
-        length_statistics=text_length_summary(raw_lengths) if raw_lengths is not None else None,
         started_at=started_at,
         finished_at=finished_at,
     )
@@ -180,14 +168,12 @@ def compare_fingerprint_to_reference(
         tested_model=candidate.model,
         feature_kind=reference.feature_kind,
         field=reference.field,
-        length_field=reference.length_field,
         successful_sample_count=len(candidate.values),
         distribution=candidate.distribution,
         distances=distances,
         acceptance_tv_distance=acceptance,
         reference_reliable=reliable,
         matches_reference=reliable and distances["total_variation_distance"] <= acceptance,
-        length_statistics=candidate.length_statistics,
     )
 
 
@@ -201,10 +187,8 @@ def _validate_compatible_fingerprints(
     reference_configuration.pop("model", None)
     if (
         candidate.prompt != reference.prompt
-        or candidate.system != reference.system
         or candidate.feature_kind != reference.feature_kind
         or candidate.field != reference.field
-        or candidate.length_field != reference.length_field
         or candidate_configuration != reference_configuration
     ):
         raise ValueError(
@@ -212,78 +196,26 @@ def _validate_compatible_fingerprints(
         )
 
 
-def test_model_against_fingerprint(
-    client: LLMClient,
-    fingerprint: ModelFingerprint,
-    parser: Parser,
-    *,
-    count: int = 20,
-) -> FingerprintTestResult:
-    """Sample and compare only the feature kind stored in ``fingerprint``."""
-    _validate_count(count, "count")
-    _validate_feature_kind(fingerprint.feature_kind)
-    candidate_configuration = _request_configuration(
-        client, temperature=fingerprint.temperature, max_tokens=fingerprint.max_tokens
-    )
-    sampling_keys = (
-        "extra_body", "top_p", "top_k", "presence_penalty", "frequency_penalty",
-        "reasoning", "reasoning_effort",
-    )
-    if any(candidate_configuration[key] != fingerprint.request_configuration.get(key) for key in sampling_keys):
-        raise ValueError("candidate sampling parameters must match the fingerprint")
-    values, raw_lengths = _collect_feature_values(
-        client,
-        fingerprint.prompt,
-        parser,
-        feature_kind=fingerprint.feature_kind,
-        field=fingerprint.field or "parsed",
-        length_field=fingerprint.length_field or "content",
-        count=count,
-        system=fingerprint.system,
-        temperature=fingerprint.temperature,
-        max_tokens=fingerprint.max_tokens,
-    )
-    distances = compare_distributions(fingerprint.values, values)
-    acceptance = float(fingerprint.stability["total_variation_distance"]["p95"])
-    reliable = bool(fingerprint.stability["reliable"])
-    return FingerprintTestResult(
-        reference_model=fingerprint.model,
-        tested_model=client.config.model,
-        feature_kind=fingerprint.feature_kind,
-        field=fingerprint.field,
-        length_field=fingerprint.length_field,
-        successful_sample_count=len(values),
-        distribution=distribution(values),
-        distances=distances,
-        acceptance_tv_distance=acceptance,
-        reference_reliable=reliable,
-        matches_reference=reliable and distances["total_variation_distance"] <= acceptance,
-        length_statistics=text_length_summary(raw_lengths) if raw_lengths is not None else None,
-    )
-
-
-test_model_against_fingerprint.__test__ = False
-
-
 def _request_configuration(
-    client: LLMClient, *, temperature: float | None, max_tokens: int | None
+    client: LLMClient, *, system: str | None, temperature: float | None, max_tokens: int | None
 ) -> dict[str, Any]:
+    """Return the complete request parameters recorded with a fingerprint."""
     return {
-        "model": client.config.model,
-        "standard_system_prompt": SYSTEM_PROMPT,
+        "system_prompt": _effective_system_prompt(system),
         "temperature": temperature if temperature is not None else client.config.temperature,
         "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
+        "top_p": getattr(client.config, "top_p", 1.0),
+        "top_k": getattr(client.config, "top_k", None),
+        "presence_penalty": getattr(client.config, "presence_penalty", 0.0),
+        "frequency_penalty": getattr(client.config, "frequency_penalty", 0.0),
+        "reasoning": (
+            dict(getattr(client.config, "reasoning", None))
+            if isinstance(getattr(client.config, "reasoning", None), Mapping)
+            else getattr(client.config, "reasoning", None)
+        ),
+        "reasoning_effort": getattr(client.config, "reasoning_effort", None),
         "extra_body": dict(getattr(client.config, "extra_body", {})),
         "extra_headers": dict(getattr(client.config, "extra_headers", {})),
-        "top_p": getattr(client.config, "top_p", None),
-        "top_k": getattr(client.config, "top_k", None),
-        "presence_penalty": getattr(client.config, "presence_penalty", None),
-        "frequency_penalty": getattr(client.config, "frequency_penalty", None),
-        "reasoning": getattr(client.config, "reasoning", None),
-        "reasoning_effort": getattr(client.config, "reasoning_effort", None),
-        "api_version": getattr(client.config, "api_version", None) if client.config.provider == "anthropic" else None,
-        "disable_response_cache": getattr(client.config, "disable_response_cache", True),
-        "cache_bust_query_param": getattr(client.config, "cache_bust_query_param", None),
     }
 
 

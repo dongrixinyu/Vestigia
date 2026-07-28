@@ -17,7 +17,6 @@ from vestigia.identify import (
     Parser,
     build_model_fingerprint,
     compare_fingerprint_to_reference,
-    test_model_against_fingerprint,
 )
 from vestigia.llm import LLMClient, LLMConfig
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
@@ -102,7 +101,6 @@ def create_fingerprint(
             feature_kind=feature_kind,
             field=selected_field,
             system=system,
-            length_field=length_field,
         )
     if output is not None:
         save_fingerprint(fingerprint, output, prompt_id=prompt_id)
@@ -153,8 +151,6 @@ def identify_fingerprint(
             selected_parser,
             feature_kind=template.feature_kind,
             field=template.field or "parsed",
-            length_field=template.length_field or "content",
-            system=template.system,
             count=count,
         )
 
@@ -201,19 +197,9 @@ def _validated_request_params(request_params: Mapping[str, Any] | None) -> dict[
 
 def _reference_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
     """Recover the reference fingerprint's request controls for verification."""
-    configuration = fingerprint.request_configuration
-    return {
-        "temperature": fingerprint.temperature,
-        "max_tokens": fingerprint.max_tokens,
-        "top_p": configuration.get("top_p"),
-        "top_k": configuration.get("top_k"),
-        "presence_penalty": configuration.get("presence_penalty"),
-        "frequency_penalty": configuration.get("frequency_penalty"),
-        "reasoning": configuration.get("reasoning"),
-        "reasoning_effort": configuration.get("reasoning_effort"),
-        "extra_body": dict(configuration.get("extra_body", {})),
-        "extra_headers": dict(configuration.get("extra_headers", {})),
-    }
+    configuration = dict(fingerprint.request_configuration)
+    configuration.pop("system_prompt", None)
+    return configuration
 
 
 def save_fingerprint(
@@ -246,7 +232,7 @@ def save_fingerprint(
         "prompt_id": resolved_prompt_id,
         "prompt": fingerprint.prompt,
         "parameters_hash": params_hash,
-        "request_params": _effective_request_params(fingerprint),
+        "request_params": dict(fingerprint.request_configuration),
         "feature_kind": fingerprint.feature_kind,
         "field": fingerprint.field,
         "values": fingerprint.values,
@@ -260,22 +246,8 @@ def save_fingerprint(
 
 
 def _effective_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
-    """Return every effective request parameter, including unsent defaults."""
-    configuration = fingerprint.request_configuration
-    effective = {
-        key: (dict(value) if isinstance(value, Mapping) else value)
-        for key, value in DEFAULT_REQUEST_PARAMS.items()
-    }
-    effective.update(
-        {
-            "temperature": fingerprint.temperature,
-            "max_tokens": fingerprint.max_tokens,
-            **{key: configuration[key] for key in _REQUEST_PARAM_NAMES if key in configuration},
-        }
-    )
-    for key in ("extra_body", "extra_headers"):
-        effective[key] = dict(effective[key] or {})
-    return effective
+    """Return the complete request parameters recorded with a fingerprint."""
+    return dict(fingerprint.request_configuration)
 
 
 def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
@@ -376,21 +348,20 @@ def _coerce_saved_batch_fingerprint(value: Mapping[str, Any]) -> ModelFingerprin
     missing = required - value.keys()
     if missing:
         raise ValueError(f"fingerprint is missing fields: {', '.join(sorted(missing))}")
-    params = _validated_request_params(value["request_params"])
+    raw_params = dict(value["request_params"])
+    system_prompt = raw_params.get("system_prompt", SYSTEM_PROMPT)
+    if not isinstance(system_prompt, str):
+        raise ValueError("fingerprint request_params.system_prompt must be a string")
+    params = _validated_request_params({
+        key: item for key, item in raw_params.items() if key != "system_prompt"
+    })
+    params["system_prompt"] = system_prompt
     return ModelFingerprint(
         model=str(value["model"]),
         prompt=str(value["prompt"]),
-        system=SYSTEM_PROMPT,
-        temperature=params["temperature"],
-        max_tokens=params["max_tokens"],
-        request_configuration={
-            "model": str(value["model"]),
-            "standard_system_prompt": SYSTEM_PROMPT,
-            **params,
-        },
+        request_configuration=params,
         feature_kind=str(value["feature_kind"]),  # type: ignore[arg-type]
         field=str(value["field"]) if isinstance(value["field"], str) else None,
-        length_field=None,
         values=tuple(str(item) for item in value["values"]),
         distribution=dict(value["distribution"]),
         stability=dict(value["stability"]),
@@ -414,25 +385,12 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
     return ModelFingerprint(
         model=str(value["model"]),
         prompt=str(value["prompt"]),
-        system=value["system"] if isinstance(value["system"], str) else None,
-        temperature=value["temperature"] if isinstance(value["temperature"], (int, float)) else None,
-        max_tokens=value["max_tokens"] if isinstance(value["max_tokens"], int) else None,
         request_configuration=dict(value["request_configuration"]),
         feature_kind=str(value["feature_kind"]),  # type: ignore[arg-type]
         field=str(value["field"]) if isinstance(value["field"], str) else None,
-        length_field=(
-            str(value["length_field"])
-            if isinstance(value["length_field"], str)
-            else None
-        ),
         values=tuple(str(item) for item in value["values"]),
         distribution=dict(value["distribution"]),
         stability=dict(value["stability"]),
-        length_statistics=(
-            dict(value["length_statistics"])
-            if isinstance(value.get("length_statistics"), Mapping)
-            else None
-        ),
         started_at=str(value["started_at"]) if isinstance(value.get("started_at"), str) else None,
         finished_at=str(value["finished_at"]) if isinstance(value.get("finished_at"), str) else None,
     )

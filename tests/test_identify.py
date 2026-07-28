@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from vestigia import (
-    build_model_fingerprint,
-    compare_fingerprint_to_reference,
-    test_model_against_fingerprint,
-)
+from vestigia import build_model_fingerprint, compare_fingerprint_to_reference
 from vestigia.llm import LLMResponse
 
 
@@ -48,8 +44,8 @@ def test_parsed_fingerprint_contains_no_length_distribution() -> None:
     assert fingerprint.feature_kind == "parsed"
     assert fingerprint.values == ("76",) * 50
     assert fingerprint.distribution == {"76": 1.0}
-    assert fingerprint.length_field is None
-    assert fingerprint.length_statistics is None
+    assert fingerprint.request_configuration["system_prompt"]
+    assert fingerprint.request_configuration["temperature"] == 0.1
 
 
 def test_length_fingerprint_contains_no_parsed_distribution() -> None:
@@ -64,13 +60,7 @@ def test_length_fingerprint_contains_no_parsed_distribution() -> None:
 
     assert fingerprint.feature_kind == "length"
     assert fingerprint.field is None
-    assert fingerprint.length_field == "reasoning_content"
-    assert fingerprint.length_statistics == {
-        "mean": 60.0,
-        "standard_deviation": 0.0,
-        "min": 60.0,
-        "max": 60.0,
-    }
+    assert fingerprint.request_configuration["system_prompt"]
     assert fingerprint.distribution == {'{"lower":32,"upper_exclusive":64}': 1.0}
 
 
@@ -95,21 +85,3 @@ def test_collected_fingerprints_compare_without_another_model_call() -> None:
     assert result.reference_model == "reference"
     assert result.tested_model == "unknown"
     assert result.matches_reference is True
-
-
-
-    fingerprint = build_model_fingerprint(
-        FakeClient("reference", ["76"] * 50),
-        "Pick a favorite number.",
-        parse_number,
-        field="parsed.value",
-        count=50,
-    )
-
-    result = test_model_against_fingerprint(
-        FakeClient("candidate", ["76"] * 20), fingerprint, parse_number, count=20
-    )
-
-    assert result.feature_kind == "parsed"
-    assert result.matches_reference is True
-    assert result.length_statistics is None

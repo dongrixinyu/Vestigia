@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from vestigia.config import SYSTEM_PROMPT
 from vestigia.identify import ModelFingerprint
 from vestigia.prompts.favorite_number import PROMPT as FAVORITE_NUMBER
 from vestigia.workflow import _select_prompt, load_fingerprint, save_fingerprint
@@ -13,13 +14,21 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
     fingerprint = ModelFingerprint(
         model="reference-model",
         prompt="Reply with one word.",
-        system=None,
-        temperature=0.1,
-        max_tokens=16,
-        request_configuration={"extra_body": {"top_p": 0.9}},
+        request_configuration={
+            "system_prompt": SYSTEM_PROMPT,
+            "temperature": 0.1,
+            "max_tokens": 16,
+            "top_p": 1.0,
+            "top_k": None,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "reasoning": None,
+            "reasoning_effort": None,
+            "extra_body": {"top_p": 0.9},
+            "extra_headers": {},
+        },
         feature_kind="parsed",
         field="parsed.text",
-        length_field=None,
         values=("yes",),
         distribution={"yes": 1.0},
         stability={"reliable": True},
@@ -35,6 +44,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
     assert payload["prompt_id"] == "custom_probe"
     assert len(payload["parameters_hash"]) == 16
     assert payload["request_params"] == {
+        "system_prompt": SYSTEM_PROMPT,
         "temperature": 0.1,
         "max_tokens": 16,
         "top_p": 1.0,
@@ -61,11 +71,11 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
 def test_save_fingerprint_uses_parameters_to_separate_files(tmp_path) -> None:
     common = dict(
         model="reference-model", prompt=FAVORITE_NUMBER.variants[0],
-        system=None, max_tokens=16, feature_kind="parsed", field="parsed.text", length_field=None,
+        feature_kind="parsed", field="parsed.text",
         values=("yes",), distribution={"yes": 1.0}, stability={"reliable": True},
     )
-    cold = ModelFingerprint(temperature=0.1, request_configuration={"temperature": 0.1}, **common)
-    warm = ModelFingerprint(temperature=0.7, request_configuration={"temperature": 0.7}, **common)
+    cold = ModelFingerprint(request_configuration={"system_prompt": SYSTEM_PROMPT, "temperature": 0.1}, **common)
+    warm = ModelFingerprint(request_configuration={"system_prompt": SYSTEM_PROMPT, "temperature": 0.7}, **common)
 
     cold_path = save_fingerprint(cold, tmp_path, prompt_id="favorite_number")
     warm_path = save_fingerprint(warm, tmp_path, prompt_id="favorite_number")
@@ -75,9 +85,8 @@ def test_save_fingerprint_uses_parameters_to_separate_files(tmp_path) -> None:
 
 def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> None:
     fingerprint = ModelFingerprint(
-        model="reference-model", prompt="unknown", system=None,
-        temperature=None, max_tokens=None, request_configuration={}, feature_kind="parsed",
-        field="parsed.text", length_field=None, values=("yes",), distribution={"yes": 1.0},
+        model="reference-model", prompt="unknown", request_configuration={}, feature_kind="parsed",
+        field="parsed.text", values=("yes",), distribution={"yes": 1.0},
         stability={"reliable": True},
     )
 
