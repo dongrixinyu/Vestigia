@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from collections.abc import Mapping
 from typing import Any
 
 import litellm
+from loguru import logger
 
 from vestigia.config import NETWORK_RETRY_MAX_RETRIES
 from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
-
-
-logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -124,7 +121,7 @@ class LLMClient:
                     raise
                 if retry_number == NETWORK_RETRY_MAX_RETRIES:
                     logger.error(
-                        "LLM network request failed after %d retries (model=%s, endpoint=%s): %s",
+                        "LLM network request failed after {} retries (model={}, endpoint={}): {}",
                         NETWORK_RETRY_MAX_RETRIES,
                         self.config.model,
                         self.config.endpoint or self.config.base_url,
@@ -132,7 +129,7 @@ class LLMClient:
                     )
                     raise
                 logger.warning(
-                    "LLM network request failed; retrying (%d/%d, model=%s): %s",
+                    "LLM network request failed; retrying ({}/{}, model={}): {}",
                     retry_number + 1,
                     NETWORK_RETRY_MAX_RETRIES,
                     self.config.model,

@@ -27,6 +27,7 @@ classifiers = [
 ]
 dependencies = [
   "litellm>=1.63,<1.92",
+  "loguru>=0.7,<1",
 ]
 
 [project.optional-dependencies]

@@ -139,7 +139,8 @@ def test_config_rejects_multi_completion_and_stream_overrides() -> None:
 
 
 @patch("vestigia.llm.client.litellm.completion", side_effect=ConnectionError("network unavailable"))
-def test_network_errors_retry_then_emit_failure_alert(completion, caplog) -> None:
+@patch("vestigia.llm.client.logger.error")
+def test_network_errors_retry_then_emit_failure_alert(error_log, completion) -> None:
     client = LLMClient(
         LLMConfig(
             provider="openai_compatible",
@@ -153,7 +154,9 @@ def test_network_errors_retry_then_emit_failure_alert(completion, caplog) -> Non
         client.complete("hello")
 
     assert completion.call_count == 6  # Initial call plus five configured retries.
-    assert "failed after 5 retries" in caplog.text
+    error_log.assert_called_once()
+    assert "failed after {} retries" in error_log.call_args.args[0]
+    assert error_log.call_args.args[1] == 5
 
 
 @patch("vestigia.llm.client.litellm.completion", side_effect=RuntimeError("bad key"))
