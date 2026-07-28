@@ -1,4 +1,6 @@
-<img src="./image/vestigia_logo.svg" width="800" alt="">
+<center>
+<img src="./image/vestigia_logo.svg" width="500" alt="">
+</center>
 
 # Vestigia
 
