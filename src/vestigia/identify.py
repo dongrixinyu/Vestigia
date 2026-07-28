@@ -31,7 +31,6 @@ class ModelFingerprint:
     """
 
     model: str
-    provider: str
     prompt: str
     system: str | None
     temperature: float | None
@@ -113,7 +112,6 @@ def build_model_fingerprint(
     )
     return ModelFingerprint(
         model=client.config.model,
-        provider=client.config.provider,
         prompt=prompt,
         system=system,
         temperature=temperature if temperature is not None else client.config.temperature,
@@ -186,7 +184,6 @@ def _request_configuration(
     client: LLMClient, *, temperature: float | None, max_tokens: int | None
 ) -> dict[str, Any]:
     return {
-        "provider": client.config.provider,
         "model": client.config.model,
         "temperature": temperature if temperature is not None else client.config.temperature,
         "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,

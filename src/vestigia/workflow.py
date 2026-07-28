@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,10 @@ def create_fingerprint(
     calls. The probe's parser is used automatically unless explicitly
     overridden.
 
+    ``provider`` selects only the wire protocol used by the endpoint (for
+    example, an OpenAI-compatible relay); it is not persisted in the
+    fingerprint identity or filename.
+
     ``base_url``, ``api_key`` and ``model`` are the required connection values.
     Sampling controls accepted by the target API belong in ``temperature``,
     ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
@@ -102,7 +108,7 @@ def create_fingerprint(
             length_field=length_field,
         )
     if output is not None:
-        save_fingerprint(fingerprint, output)
+        save_fingerprint(fingerprint, output, prompt_id=prompt_id)
     return fingerprint
 
 
@@ -155,11 +161,66 @@ def verify_fingerprint(
         return test_model_against_fingerprint(client, reference, selected_parser, count=count)
 
 
-def save_fingerprint(fingerprint: ModelFingerprint, output: str | Path) -> None:
-    """Persist a reference fingerprint as readable UTF-8 JSON."""
-    path = Path(output)
+def save_fingerprint(
+    fingerprint: ModelFingerprint,
+    output_directory: str | Path,
+    *,
+    prompt_id: str | None = None,
+) -> Path:
+    """Persist a fingerprint under a canonical, configuration-specific filename.
+
+    ``output_directory`` is always treated as a directory. The filename is
+    ``{model}__{prompt_id}__{params_hash}.json`` so fingerprints produced
+    under different model or request settings cannot overwrite one another. Callers saving an existing fingerprint may omit ``prompt_id``;
+    in that case it is recovered from the built-in prompt catalog.
+    """
+    resolved_prompt_id = prompt_id or _prompt_id_for_fingerprint(fingerprint)
+    params_hash = _fingerprint_parameters_hash(fingerprint)
+    filename = "__".join(
+        (
+            _filename_component(fingerprint.model),
+            _filename_component(resolved_prompt_id),
+            params_hash,
+        )
+    ) + ".json"
+    path = Path(output_directory) / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(fingerprint.to_dict(), ensure_ascii=False, indent=2) + "\n", "utf-8")
+    payload = fingerprint.to_dict()
+    payload["prompt_id"] = resolved_prompt_id
+    payload["parameters_hash"] = params_hash
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    return path
+
+
+def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
+    """Hash all request and feature controls apart from filename identity fields."""
+    parameters = {
+        "prompt": fingerprint.prompt,
+        "request_configuration": fingerprint.request_configuration,
+        "system": fingerprint.system,
+        "feature_kind": fingerprint.feature_kind,
+        "field": fingerprint.field,
+        "length_field": fingerprint.length_field,
+    }
+    canonical = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _filename_component(value: str) -> str:
+    """Make one human-readable filename component safe on common filesystems."""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    return safe.strip("._") or "unknown"
+
+
+def _prompt_id_for_fingerprint(fingerprint: ModelFingerprint) -> str:
+    matching_templates = [
+        template for template in DEFAULT_PROMPTS if fingerprint.prompt in template.variants
+    ]
+    if len(matching_templates) != 1:
+        raise ValueError(
+            "cannot infer prompt_id from fingerprint prompt; pass prompt_id explicitly"
+        )
+    return matching_templates[0].id
 
 
 def load_fingerprint(input_path: str | Path) -> ModelFingerprint:
@@ -219,7 +280,7 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
     if isinstance(value, ModelFingerprint):
         return value
     required = {
-        "model", "provider", "prompt", "system", "temperature", "max_tokens",
+        "model", "prompt", "system", "temperature", "max_tokens",
         "request_configuration", "feature_kind", "field", "length_field", "values", "distribution", "stability",
     }
     missing = required - value.keys()
@@ -227,7 +288,6 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
         raise ValueError(f"fingerprint is missing fields: {', '.join(sorted(missing))}")
     return ModelFingerprint(
         model=str(value["model"]),
-        provider=str(value["provider"]),
         prompt=str(value["prompt"]),
         system=value["system"] if isinstance(value["system"], str) else None,
         temperature=value["temperature"] if isinstance(value["temperature"], (int, float)) else None,

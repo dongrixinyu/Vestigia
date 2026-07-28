@@ -236,7 +236,7 @@ vestigia-validate \
 如果只需要提供 URL、API Key 和模型名，可直接使用封装工作流；指定内置 `prompt_id` 后，工作流会从 `vestigia.prompts` 选择固定题目、自动使用该题目的 parser，并以同一措辞连续调用来建立分布。不需要自己创建 `LLMClient`、编写调用循环或处理 JSON：
 
 ```python
-from vestigia import create_fingerprint, load_fingerprint, verify_fingerprint
+from vestigia import create_fingerprint, load_fingerprint, save_fingerprint, verify_fingerprint
 
 # 从内置题库选 favorite_number 的第一个固定措辞，连续调用 50 次，
 # 用该题目的 parser 统计分布并持久化为 JSON。
@@ -244,16 +244,23 @@ reference = create_fingerprint(
     base_url="https://gateway.example.com/v1",
     api_key="reference-api-key",
     model="reference-model",
+    # API 协议：中转站可仍使用 openai_compatible。
+    provider="openai_compatible",
     prompt_id="favorite_number",
     variant_index=0,
-    output="fingerprints/reference.json",
+    # output 是目录；实际文件由库生成：
+    # {provider}__{model}__{prompt_id}__{params_hash}.json
+    output="fingerprints",
     temperature=0.1,
     max_tokens=64,
     extra_body={"top_p": 0.9, "seed": 42},
 )
 
-# 可在其他进程中加载；prompt、system 和全部采样参数自动复用。
-reference = load_fingerprint("fingerprints/reference.json")
+# create_fingerprint 返回生成的指纹；save_fingerprint 也会返回实际保存路径。
+# 已知模型、prompt 和采样配置时，可按相同规则自行拼出文件名，
+# 但通常应保存返回路径后再加载。
+reference_path = save_fingerprint(reference, "fingerprints", prompt_id="favorite_number")
+reference = load_fingerprint(reference_path)
 result = verify_fingerprint(
     reference,
     base_url="https://other-gateway.example.com/v1",
@@ -264,7 +271,7 @@ result = verify_fingerprint(
 print(result.matches_reference)
 ```
 
-默认 `field="parsed"` 会统计内置 probe 的整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。题目只能通过 `prompt_id` 从内置题库选择，不能传入任意 prompt 文本。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+默认 `field="parsed"` 会统计内置 probe 的整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。题目只能通过 `prompt_id` 从内置题库选择，不能传入任意 prompt 文本。`output` 是保存目录而不是自定义文件名：库会用 `{模型名}__{prompt_id}__{params_hash}.json` 写入文件。`params_hash` 是完整请求/特征参数（包括 temperature、max tokens、`extra_body`、system、prompt 原文及特征设置）的稳定 SHA-256 哈希，因此不同配置各自保存，不会混在同一个文件中。`provider` 仅用于选择实际接入端点的调用协议（`openai_compatible` 或 `anthropic`），不会写入持久化指纹、文件名或参数哈希；因此指纹不会留下中转站或调用格式的痕迹。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
 
 完整的“采样 → 保存 → 加载 → 比较”可直接运行 `examples/fingerprint_and_compare.py`。它只调用 `create_fingerprint`、`load_fingerprint` 和 `verify_fingerprint`；在文件顶部填写两端模型的 `LLM_*` / `CANDIDATE_LLM_*` 连接变量，内置选择 `favorite_number` 探针并输出完整比较报告。
 

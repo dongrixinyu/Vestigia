@@ -17,23 +17,23 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vestigia import create_fingerprint, load_fingerprint, verify_fingerprint
+from vestigia import create_fingerprint, load_fingerprint, save_fingerprint, verify_fingerprint
 
 # Fill in the reference model connection.
 LLM_BASE_URL = "https://gateway.example.com/v1"
 LLM_API_KEY = "your-reference-api-key"
 LLM_MODEL = "your-reference-model"
-LLM_PROVIDER = "openai_compatible"  # Or "anthropic".
-
+LLM_PROVIDER = "openai_compatible"  # Endpoint wire protocol; or "anthropic".
 # Fill in the model to compare against the reference.
 CANDIDATE_LLM_BASE_URL = "https://gateway.example.com/v1"
 CANDIDATE_LLM_API_KEY = "your-candidate-api-key"
 CANDIDATE_LLM_MODEL = "your-candidate-model"
 CANDIDATE_LLM_PROVIDER = "openai_compatible"  # Or "anthropic".
 
-REFERENCE_COUNT = 50
+MAX_TOKENS = 1024
+REFERENCE_COUNT = 5
 CANDIDATE_COUNT = 20
-FINGERPRINT_PATH = Path("fingerprints/favorite-number-reference.json")
+FINGERPRINT_DIRECTORY = Path("fingerprints")
 
 
 def main() -> None:
@@ -50,20 +50,28 @@ def main() -> None:
         field="parsed.first_number.value",
         count=REFERENCE_COUNT,
         temperature=0.1,
-        max_tokens=64,
-        output=FINGERPRINT_PATH,
+        max_tokens=MAX_TOKENS,
+        # ``output`` is a directory. Vestigia chooses the configuration-specific
+        # filename: {model}__{prompt_id}__{params_hash}.json.
+        output=FINGERPRINT_DIRECTORY,
         subset_size=20,
         resamples=1_000,
         seed=42,
     )
-    print(f"Reference fingerprint saved to: {FINGERPRINT_PATH}")
+    # save_fingerprint returns the exact canonical path chosen internally.
+    # Calling it again writes the same configuration-specific file and lets this
+    # example retain the path for a later load.
+    fingerprint_path = save_fingerprint(
+        reference, FINGERPRINT_DIRECTORY, prompt_id="favorite_number"
+    )
+    print(f"Reference fingerprint saved to: {fingerprint_path}")
     print("Reference distribution:")
     print(json.dumps(reference.distribution, ensure_ascii=False, indent=2))
 
     # 2. Load the persisted reference (as a separate process would), then
     # repeat its exact prompt and sampling controls against the candidate.
     # The built-in probe parser is recovered automatically by verify_fingerprint.
-    persisted_reference = load_fingerprint(FINGERPRINT_PATH)
+    persisted_reference = load_fingerprint(fingerprint_path)
     result = verify_fingerprint(
         persisted_reference,
         base_url=CANDIDATE_LLM_BASE_URL,
