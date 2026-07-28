@@ -164,7 +164,7 @@ def _effective_system_prompt(system: str | None) -> str:
 
 def _utc_timestamp() -> str:
     """Return an unambiguous RFC 3339 timestamp in UTC."""
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
 
 
 def compare_fingerprint_to_reference(

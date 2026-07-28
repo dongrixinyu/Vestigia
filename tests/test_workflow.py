@@ -34,7 +34,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
     payload = json.loads(output.read_text("utf-8"))
     assert payload["prompt_id"] == "custom_probe"
     assert len(payload["parameters_hash"]) == 16
-    assert payload["effective_request_params"] == {
+    assert payload["request_params"] == {
         "temperature": 0.1,
         "max_tokens": 16,
         "top_p": 1.0,
@@ -42,11 +42,20 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
         "reasoning": None,
-        "reasoning_effort": "high",
+        "reasoning_effort": None,
         "extra_body": {"top_p": 0.9},
         "extra_headers": {},
     }
-    assert load_fingerprint(output) == fingerprint
+    assert "request_configuration" not in payload
+    assert "system" not in payload
+    assert "length_field" not in payload
+    assert "length_statistics" not in payload
+    assert "effective_request_params" not in payload
+    loaded = load_fingerprint(output)
+    assert loaded.model == fingerprint.model
+    assert loaded.prompt == fingerprint.prompt
+    assert loaded.values == fingerprint.values
+    assert loaded.request_configuration["extra_body"] == {"top_p": 0.9}
 
 
 def test_save_fingerprint_uses_parameters_to_separate_files(tmp_path) -> None:

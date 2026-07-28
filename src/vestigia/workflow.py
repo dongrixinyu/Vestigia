@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from vestigia.config import DEFAULT_REQUEST_PARAMS
+from vestigia.config import DEFAULT_REQUEST_PARAMS, SYSTEM_PROMPT
 from vestigia.identify import (
     FingerprintIdentificationResult,
     FingerprintTestResult,
@@ -241,10 +241,20 @@ def save_fingerprint(
     ) + ".json"
     path = Path(output_directory) / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = fingerprint.to_dict()
-    payload["prompt_id"] = resolved_prompt_id
-    payload["parameters_hash"] = params_hash
-    payload["effective_request_params"] = _effective_request_params(fingerprint)
+    payload = {
+        "model": fingerprint.model,
+        "prompt_id": resolved_prompt_id,
+        "prompt": fingerprint.prompt,
+        "parameters_hash": params_hash,
+        "request_params": _effective_request_params(fingerprint),
+        "feature_kind": fingerprint.feature_kind,
+        "field": fingerprint.field,
+        "values": fingerprint.values,
+        "distribution": fingerprint.distribution,
+        "stability": fingerprint.stability,
+        "started_at": fingerprint.started_at,
+        "finished_at": fingerprint.finished_at,
+    }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", "utf-8")
     return path
 
@@ -272,11 +282,9 @@ def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
     """Hash all request and feature controls apart from filename identity fields."""
     parameters = {
         "prompt": fingerprint.prompt,
-        "request_configuration": fingerprint.request_configuration,
-        "system": fingerprint.system,
+        "request_params": _effective_request_params(fingerprint),
         "feature_kind": fingerprint.feature_kind,
         "field": fingerprint.field,
-        "length_field": fingerprint.length_field,
     }
     canonical = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
@@ -286,7 +294,7 @@ def _timestamp_filename_component(timestamp: str | None) -> str:
     """Make an RFC 3339 timestamp safe for use in a filename."""
     if timestamp is None:
         return "unknown-time"
-    return timestamp.replace(":", "-")
+    return timestamp
 
 
 def _filename_component(value: str) -> str:
@@ -359,9 +367,43 @@ def _prompt_template(prompt_id: str) -> PromptTemplate:
     raise ValueError(f"unknown prompt_id {prompt_id!r}; available prompt IDs: {available}")
 
 
+def _coerce_saved_batch_fingerprint(value: Mapping[str, Any]) -> ModelFingerprint:
+    """Rebuild the runtime fingerprint object from the compact saved format."""
+    required = {
+        "model", "prompt", "request_params", "feature_kind", "field",
+        "values", "distribution", "stability",
+    }
+    missing = required - value.keys()
+    if missing:
+        raise ValueError(f"fingerprint is missing fields: {', '.join(sorted(missing))}")
+    params = _validated_request_params(value["request_params"])
+    return ModelFingerprint(
+        model=str(value["model"]),
+        prompt=str(value["prompt"]),
+        system=SYSTEM_PROMPT,
+        temperature=params["temperature"],
+        max_tokens=params["max_tokens"],
+        request_configuration={
+            "model": str(value["model"]),
+            "standard_system_prompt": SYSTEM_PROMPT,
+            **params,
+        },
+        feature_kind=str(value["feature_kind"]),  # type: ignore[arg-type]
+        field=str(value["field"]) if isinstance(value["field"], str) else None,
+        length_field=None,
+        values=tuple(str(item) for item in value["values"]),
+        distribution=dict(value["distribution"]),
+        stability=dict(value["stability"]),
+        started_at=str(value["started_at"]) if isinstance(value.get("started_at"), str) else None,
+        finished_at=str(value["finished_at"]) if isinstance(value.get("finished_at"), str) else None,
+    )
+
+
 def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFingerprint:
     if isinstance(value, ModelFingerprint):
         return value
+    if "request_params" in value:
+        return _coerce_saved_batch_fingerprint(value)
     required = {
         "model", "prompt", "system", "temperature", "max_tokens",
         "request_configuration", "feature_kind", "field", "length_field", "values", "distribution", "stability",
