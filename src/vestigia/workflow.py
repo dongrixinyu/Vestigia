@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from vestigia.identify import (
+    FingerprintIdentificationResult,
     FingerprintTestResult,
     ModelFingerprint,
     Parser,
     build_model_fingerprint,
+    compare_fingerprint_to_reference,
     test_model_against_fingerprint,
 )
 from vestigia.llm import LLMClient, LLMConfig
@@ -106,8 +108,8 @@ def create_fingerprint(
     return fingerprint
 
 
-def verify_fingerprint(
-    fingerprint: ModelFingerprint | Mapping[str, Any],
+def identify_fingerprint(
+    reference_directory: str | Path,
     *,
     base_url: str,
     api_key: str,
@@ -117,21 +119,23 @@ def verify_fingerprint(
     request_params: Mapping[str, Any] | None = None,
     parser: Parser | None = None,
     count: int = 20,
-) -> FingerprintTestResult:
-    """Repeat the reference request against another model and compare it.
+) -> FingerprintIdentificationResult:
+    """Identify one sampled model by comparing it to all saved fingerprints.
 
-    The reference prompt, system instruction, token limit, temperature and
-    feature field are reused automatically. ``request_params`` may contain
-    explicit request-control overrides; each must match the reference
-    fingerprint's saved sampling configuration. The probe parser is recovered from
-    the built-in prompt catalog; pass ``parser`` only to explicitly override
-    it. ``extra_body`` must contain the same sampling controls as the reference
-    default. Pass ``extra_body`` only to explicitly override them; a mismatch
-    raises ``ValueError``.
+    Historical references are loaded from ``reference_directory``. They must
+    share one prompt, feature definition, and request configuration so the
+    candidate is sampled exactly once. The returned comparisons are sorted by
+    total-variation distance; ``best_match`` is the closest accepted reference,
+    or ``None`` when no reference matches.
     """
-    reference = _coerce_fingerprint(fingerprint)
-    selected_parser = parser or _parser_for_fingerprint(reference)
-    params = _reference_request_params(reference)
+    references = _load_fingerprint_directory(reference_directory)
+    template = references[0]
+    for reference in references[1:]:
+        # This validates common experiment conditions without making a request.
+        compare_fingerprint_to_reference(template, reference)
+
+    selected_parser = parser or _parser_for_fingerprint(template)
+    params = _reference_request_params(template)
     params.update(_validated_request_params(request_params))
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
@@ -142,7 +146,37 @@ def verify_fingerprint(
         **params,
     )
     with LLMClient(config) as client:
-        return test_model_against_fingerprint(client, reference, selected_parser, count=count)
+        candidate = build_model_fingerprint(
+            client,
+            template.prompt,
+            selected_parser,
+            feature_kind=template.feature_kind,
+            field=template.field or "parsed",
+            length_field=template.length_field or "content",
+            system=template.system,
+            count=count,
+        )
+
+    comparisons = tuple(
+        sorted(
+            (compare_fingerprint_to_reference(candidate, reference) for reference in references),
+            key=lambda result: result.distances["total_variation_distance"],
+        )
+    )
+    best_match = next((result for result in comparisons if result.matches_reference), None)
+    return FingerprintIdentificationResult(
+        tested_model=model, comparisons=comparisons, best_match=best_match
+    )
+
+
+def _load_fingerprint_directory(directory: str | Path) -> tuple[ModelFingerprint, ...]:
+    path = Path(directory)
+    if not path.is_dir():
+        raise ValueError(f"fingerprint directory does not exist: {path}")
+    references = tuple(load_fingerprint(item) for item in sorted(path.glob("*.json")))
+    if not references:
+        raise ValueError(f"fingerprint directory contains no JSON fingerprints: {path}")
+    return references
 
 
 def _validated_request_params(request_params: Mapping[str, Any] | None) -> dict[str, Any]:

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from vestigia import build_model_fingerprint, test_model_against_fingerprint
+from vestigia import (
+    build_model_fingerprint,
+    compare_fingerprint_to_reference,
+    test_model_against_fingerprint,
+)
 from vestigia.llm import LLMResponse
 
 
@@ -70,7 +74,30 @@ def test_length_fingerprint_contains_no_parsed_distribution() -> None:
     assert fingerprint.distribution == {'{"lower":32,"upper_exclusive":64}': 1.0}
 
 
-def test_matching_parsed_candidate_is_accepted() -> None:
+def test_collected_fingerprints_compare_without_another_model_call() -> None:
+    reference = build_model_fingerprint(
+        FakeClient("reference", ["76"] * 50),
+        "Pick a favorite number.",
+        parse_number,
+        field="parsed.value",
+        count=50,
+    )
+    candidate = build_model_fingerprint(
+        FakeClient("unknown", ["76"] * 20),
+        "Pick a favorite number.",
+        parse_number,
+        field="parsed.value",
+        count=20,
+    )
+
+    result = compare_fingerprint_to_reference(candidate, reference)
+
+    assert result.reference_model == "reference"
+    assert result.tested_model == "unknown"
+    assert result.matches_reference is True
+
+
+
     fingerprint = build_model_fingerprint(
         FakeClient("reference", ["76"] * 50),
         "Pick a favorite number.",

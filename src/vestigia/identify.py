@@ -76,6 +76,22 @@ class FingerprintTestResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class FingerprintIdentificationResult:
+    """Candidate fingerprint compared against every compatible historical reference."""
+
+    tested_model: str
+    comparisons: tuple[FingerprintTestResult, ...]
+    best_match: FingerprintTestResult | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tested_model": self.tested_model,
+            "comparisons": [comparison.to_dict() for comparison in self.comparisons],
+            "best_match": self.best_match.to_dict() if self.best_match is not None else None,
+        }
+
+
 def build_model_fingerprint(
     client: LLMClient,
     prompt: str,
@@ -128,6 +144,51 @@ def build_model_fingerprint(
         stability=stability,
         length_statistics=text_length_summary(raw_lengths) if raw_lengths is not None else None,
     )
+
+
+def compare_fingerprint_to_reference(
+    candidate: ModelFingerprint, reference: ModelFingerprint
+) -> FingerprintTestResult:
+    """Compare two already-collected fingerprints without making LLM calls."""
+    _validate_compatible_fingerprints(candidate, reference)
+    distances = compare_distributions(reference.values, candidate.values)
+    acceptance = float(reference.stability["total_variation_distance"]["p95"])
+    reliable = bool(reference.stability["reliable"])
+    return FingerprintTestResult(
+        reference_model=reference.model,
+        tested_model=candidate.model,
+        feature_kind=reference.feature_kind,
+        field=reference.field,
+        length_field=reference.length_field,
+        successful_sample_count=len(candidate.values),
+        distribution=candidate.distribution,
+        distances=distances,
+        acceptance_tv_distance=acceptance,
+        reference_reliable=reliable,
+        matches_reference=reliable and distances["total_variation_distance"] <= acceptance,
+        length_statistics=candidate.length_statistics,
+    )
+
+
+def _validate_compatible_fingerprints(
+    candidate: ModelFingerprint, reference: ModelFingerprint
+) -> None:
+    """Reject comparisons made under different experimental conditions."""
+    candidate_configuration = dict(candidate.request_configuration)
+    reference_configuration = dict(reference.request_configuration)
+    candidate_configuration.pop("model", None)
+    reference_configuration.pop("model", None)
+    if (
+        candidate.prompt != reference.prompt
+        or candidate.system != reference.system
+        or candidate.feature_kind != reference.feature_kind
+        or candidate.field != reference.field
+        or candidate.length_field != reference.length_field
+        or candidate_configuration != reference_configuration
+    ):
+        raise ValueError(
+            "fingerprints must use the same prompt, feature settings, and request parameters"
+        )
 
 
 def test_model_against_fingerprint(
