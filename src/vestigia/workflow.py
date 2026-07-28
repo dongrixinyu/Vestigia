@@ -197,7 +197,7 @@ def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
         "length_field": fingerprint.length_field,
     }
     canonical = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def _filename_component(value: str) -> str:
