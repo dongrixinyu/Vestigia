@@ -1,3 +1,5 @@
+<img src="./image/vestigia_logo.svg" width="800" alt="">
+
 # Vestigia
 
 `Vestigia` 是一个可安装的 Python 包，用于通过一组问题采集多个 LLM 的非流式回答，并为后续的模型来源识别（fingerprinting）提供统一数据入口。
