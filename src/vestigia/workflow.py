@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +22,7 @@ from vestigia.identify import (
 )
 from vestigia.llm import LLMClient, LLMConfig
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
-from vestigia.prompts.base import FeatureKind
+from vestigia.validation import compare_distributions
 
 _REQUEST_PARAM_NAMES = frozenset(
     {
@@ -36,6 +38,40 @@ _REQUEST_PARAM_NAMES = frozenset(
         "extra_headers",
 }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedDistributionMatch:
+    """Closest saved fingerprint and score for one historical model."""
+
+    model: str
+    total_variation_distance: float
+    probability: float
+    fingerprint_path: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "total_variation_distance": self.total_variation_distance,
+            "probability": self.probability,
+            "fingerprint_path": str(self.fingerprint_path),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedDistributionIdentification:
+    """Offline identification result for externally collected sample values."""
+
+    values: tuple[str, ...]
+    matches: tuple[ObservedDistributionMatch, ...]
+    softmax_temperature: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "values": list(self.values),
+            "softmax_temperature": self.softmax_temperature,
+            "matches": [match.to_dict() for match in self.matches],
+        }
 
 
 def text_parser(content: str) -> dict[str, str]:
@@ -162,7 +198,60 @@ def identify_fingerprint(
     )
 
 
-def _load_fingerprint_directory(directory: str | Path) -> tuple[ModelFingerprint, ...]:
+def identify_observed_distribution(
+    values: list[str] | tuple[str, ...],
+    reference_directory: str | Path,
+    *,
+    softmax_temperature: float = 0.1,
+) -> ObservedDistributionIdentification:
+    """Identify externally collected values against saved fingerprints offline.
+
+    The score is ``softmax(-TV_distance / softmax_temperature)``. It ranks
+    relative similarity only; it is not a calibrated model-identity probability.
+    When a model has multiple saved fingerprints, its closest one is used.
+    """
+    observed = tuple(str(value) for value in values)
+    if not observed:
+        raise ValueError("values must not be empty")
+    if softmax_temperature <= 0:
+        raise ValueError("softmax_temperature must be greater than zero")
+
+    directory = Path(reference_directory)
+    paths = tuple(sorted(directory.glob("*.json"))) if directory.is_dir() else ()
+    if not paths:
+        raise ValueError(f"fingerprint directory contains no JSON fingerprints: {directory}")
+
+    closest_by_model: dict[str, tuple[float, Path]] = {}
+    for path in paths:
+        reference = load_fingerprint(path)
+        distance = compare_distributions(reference.values, observed)["total_variation_distance"]
+        previous = closest_by_model.get(reference.model)
+        if previous is None or distance < previous[0]:
+            closest_by_model[reference.model] = (distance, path)
+
+    scored = sorted(
+        ((model, distance, path) for model, (distance, path) in closest_by_model.items()),
+        key=lambda item: item[1],
+    )
+    logits = [-distance / softmax_temperature for _, distance, _ in scored]
+    maximum = max(logits)
+    weights = [math.exp(logit - maximum) for logit in logits]
+    normalizer = sum(weights)
+    matches = tuple(
+        ObservedDistributionMatch(
+            model=model,
+            total_variation_distance=distance,
+            probability=weight / normalizer,
+            fingerprint_path=path,
+        )
+        for (model, distance, path), weight in zip(scored, weights, strict=True)
+    )
+    return ObservedDistributionIdentification(
+        values=observed, matches=matches, softmax_temperature=softmax_temperature
+    )
+
+
+
     path = Path(directory)
     if not path.is_dir():
         raise ValueError(f"fingerprint directory does not exist: {path}")

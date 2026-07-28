@@ -10,8 +10,11 @@ from vestigia.identify import (
 from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
 from vestigia.workflow import (
+    ObservedDistributionIdentification,
+    ObservedDistributionMatch,
     create_fingerprint,
     identify_fingerprint,
+    identify_observed_distribution,
     load_fingerprint,
     save_fingerprint,
     text_parser,
@@ -26,11 +29,14 @@ __all__ = [
     "LLMRequestError",
     "LLMResponse",
     "ModelFingerprint",
+    "ObservedDistributionIdentification",
+    "ObservedDistributionMatch",
     "PromptTemplate",
     "build_model_fingerprint",
     "compare_fingerprint_to_reference",
     "create_fingerprint",
     "identify_fingerprint",
+    "identify_observed_distribution",
     "load_fingerprint",
     "save_fingerprint",
     "text_parser",

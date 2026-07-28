@@ -96,7 +96,7 @@ def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> 
 
 def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:
     prompt, parser, feature_kind, length_field = _select_prompt(
-        prompt_id="favorite_number", variant_index=0, parser=None
+        prompt_id="favorite_number", variant_index=0
     )
 
     assert prompt == FAVORITE_NUMBER.variants[0]
