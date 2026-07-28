@@ -9,7 +9,7 @@ from typing import Any
 import litellm
 from loguru import logger
 
-from vestigia.config import NETWORK_RETRY_MAX_RETRIES
+from vestigia.config import NETWORK_RETRY_MAX_RETRIES, SYSTEM_PROMPT
 from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
 
 
@@ -145,8 +145,8 @@ class LLMClient:
         max_tokens: int | None,
     ) -> dict[str, Any]:
         request_messages = [dict(message) for message in messages]
-        if system is not None:
-            request_messages.insert(0, {"role": "system", "content": system})
+        system_prompt = SYSTEM_PROMPT if system is None else f"{SYSTEM_PROMPT}\n\n{system}"
+        request_messages.insert(0, {"role": "system", "content": system_prompt})
         options: dict[str, Any] = {
             "model": self._litellm_model(),
             "messages": request_messages,

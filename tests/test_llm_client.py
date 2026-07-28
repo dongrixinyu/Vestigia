@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from vestigia import LLMClient, LLMConfig, LLMRequestError
+from vestigia.config import SYSTEM_PROMPT
 
 
 @patch("vestigia.llm.client.litellm.completion")
@@ -30,7 +31,7 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
     completion.assert_called_once_with(
         model="openai/configured-model",
         messages=[
-            {"role": "system", "content": "be concise"},
+            {"role": "system", "content": f"{SYSTEM_PROMPT}\n\nbe concise"},
             {"role": "user", "content": "hello"},
         ],
         api_key="secret",
@@ -45,6 +46,21 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
     assert response.reasoning_content is None
     assert response.model == "gateway-model"
     assert response.request_id == "chatcmpl_123"
+
+
+def test_client_injects_standard_system_prompt_when_no_custom_system_is_given() -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example/v1",
+            api_key="secret",
+            model="configured-model",
+        )
+    )
+
+    assert client._request_options([{"role": "user", "content": "hello"}], None, None, None)[
+        "messages"
+    ][0] == {"role": "system", "content": SYSTEM_PROMPT}
 
 
 @patch("vestigia.llm.client.litellm.completion")

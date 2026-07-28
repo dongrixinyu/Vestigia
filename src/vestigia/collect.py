@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vestigia.config import SYSTEM_PROMPT
 from vestigia.fingerprint import build_fingerprint
 from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse, RequestSignature
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate, iter_prompts
@@ -199,7 +200,7 @@ def run(args: argparse.Namespace) -> int:
                 prompt_id=template.id,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
-                system=args.system,
+                system=_effective_system_prompt(args.system),
                 extra_body=config.extra_body,
                 disable_response_cache=config.disable_response_cache,
                 cache_bust_query_param=config.cache_bust_query_param,
@@ -239,6 +240,11 @@ def run(args: argparse.Namespace) -> int:
             json.dumps(fingerprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
     return 1 if failures else 0
+
+
+def _effective_system_prompt(system: str | None) -> str:
+    """Match the mandatory system prompt injected by :class:`LLMClient`."""
+    return SYSTEM_PROMPT if system is None else f"{SYSTEM_PROMPT}\n\n{system}"
 
 
 def main(argv: Sequence[str] | None = None) -> None:

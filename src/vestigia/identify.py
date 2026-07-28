@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+from vestigia.config import SYSTEM_PROMPT
 from vestigia.fingerprint import canonical_value, resolve_field
 from vestigia.llm import LLMClient, LLMResponse
 from vestigia.validation import (
@@ -187,6 +188,7 @@ def _request_configuration(
 ) -> dict[str, Any]:
     return {
         "model": client.config.model,
+        "standard_system_prompt": SYSTEM_PROMPT,
         "temperature": temperature if temperature is not None else client.config.temperature,
         "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
         "extra_body": dict(getattr(client.config, "extra_body", {})),
