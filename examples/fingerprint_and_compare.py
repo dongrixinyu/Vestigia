@@ -24,6 +24,9 @@ LLM_BASE_URL = "https://gateway.example.com/v1"
 LLM_API_KEY = "your-reference-api-key"
 LLM_MODEL = "your-reference-model"
 LLM_PROVIDER = "openai_compatible"  # Endpoint wire protocol; or "anthropic".
+
+
+
 # Fill in the model to compare against the reference.
 CANDIDATE_LLM_BASE_URL = "https://gateway.example.com/v1"
 CANDIDATE_LLM_API_KEY = "your-candidate-api-key"
@@ -54,9 +57,6 @@ def main() -> None:
         # ``output`` is a directory. Vestigia chooses the configuration-specific
         # filename: {model}__{prompt_id}__{params_hash}.json.
         output=FINGERPRINT_DIRECTORY,
-        subset_size=20,
-        resamples=1_000,
-        seed=42,
     )
     # save_fingerprint returns the exact canonical path chosen internally.
     # Calling it again writes the same configuration-specific file and lets this

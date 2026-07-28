@@ -17,6 +17,12 @@ from vestigia.validation import (
 )
 
 Parser = Callable[[str], Mapping[str, Any]]
+_STABILITY_SUBSET_SIZE = 20
+_STABILITY_RESAMPLES = 1_000
+_STABILITY_SEED = 0
+_STABILITY_MAX_P95_TV_DISTANCE = 0.20
+
+
 FeatureKind = Literal["parsed", "length"]
 LengthField = Literal["content", "reasoning_content"]
 
@@ -81,10 +87,6 @@ def build_model_fingerprint(
     system: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
-    subset_size: int = 20,
-    resamples: int = 1_000,
-    seed: int | None = 0,
-    max_p95_tv_distance: float = 0.20,
 ) -> ModelFingerprint:
     """Call a model repeatedly and build exactly one selected feature distribution."""
     _validate_count(count, "count")
@@ -105,10 +107,10 @@ def build_model_fingerprint(
     )
     stability = validate_stability(
         values,
-        sample_size=subset_size,
-        resamples=resamples,
-        seed=seed,
-        max_p95_tv_distance=max_p95_tv_distance,
+        sample_size=min(_STABILITY_SUBSET_SIZE, len(values)),
+        resamples=_STABILITY_RESAMPLES,
+        seed=_STABILITY_SEED,
+        max_p95_tv_distance=_STABILITY_MAX_P95_TV_DISTANCE,
     )
     return ModelFingerprint(
         model=client.config.model,

@@ -39,8 +39,6 @@ def test_parsed_fingerprint_contains_no_length_distribution() -> None:
         feature_kind="parsed",
         field="parsed.value",
         count=50,
-        subset_size=20,
-        resamples=20,
     )
 
     assert fingerprint.feature_kind == "parsed"
@@ -58,8 +56,6 @@ def test_length_fingerprint_contains_no_parsed_distribution() -> None:
         feature_kind="length",
         length_field="reasoning_content",
         count=50,
-        subset_size=20,
-        resamples=20,
     )
 
     assert fingerprint.feature_kind == "length"
@@ -81,8 +77,6 @@ def test_matching_parsed_candidate_is_accepted() -> None:
         parse_number,
         field="parsed.value",
         count=50,
-        subset_size=20,
-        resamples=20,
     )
 
     result = test_model_against_fingerprint(

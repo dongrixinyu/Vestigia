@@ -305,9 +305,6 @@ fingerprint = build_model_fingerprint(
     parse,
     field="parsed.first_number.value",
     count=50,
-    subset_size=20,
-    resamples=1000,
-    seed=42,
 )
 assert fingerprint.stability["reliable"]
 
@@ -322,7 +319,7 @@ print(result.matches_reference)
 print(result.distances["total_variation_distance"])
 ```
 
-`build_model_fingerprint` 每次只建立一种特征指纹，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（provider、model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。`feature_kind="parsed"` 提取 `parser` 返回结果中的 `field` 并建立分类分布；`feature_kind="length"` 只统计指定 LiteLLM 字段（`content` 或 `reasoning_content`）的长度桶分布，不调用 parser，也不生成分类分布。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`，并执行自身子集稳定性检验。
+`build_model_fingerprint` 每次只建立一种特征指纹，并在 `fingerprint.request_configuration` 中记录不含密钥的完整请求控制配置（model、temperature、max tokens、`extra_body`、协议版本与缓存策略）。`count` 是唯一的采样数量参数，表示实际向模型发起的调用次数。`feature_kind="parsed"` 提取 `parser` 返回结果中的 `field` 并建立分类分布；`feature_kind="length"` 只统计指定 LiteLLM 字段（`content` 或 `reasoning_content`）的长度桶分布，不调用 parser，也不生成分类分布。长度按 2 的幂分区间，例如 `1`、`2–3`、`4–7`、`8–15`、`16–31`。
 
 `test_model_against_fingerprint` 自动复用参考指纹的 prompt、system、temperature 和 max tokens，并拒绝 `extra_body`（包括 `top_p`、seed 等）不一致的候选配置。待测模型名称可以不同——这正是识别任务的目标——但候选模型的**同一种**特征分布必须落在参考样本自身波动范围内，`matches_reference` 才为真。长度型指纹还保留平均值、标准差、最小值和最大值作辅助解释。结果对象均可用 `.to_dict()` 保存为 JSON。
 

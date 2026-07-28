@@ -49,9 +49,6 @@ def create_fingerprint(
     parser: Parser | None = None,
     field: str | None = None,
     count: int = 50,
-    subset_size: int = 20,
-    resamples: int = 1_000,
-    seed: int | None = 0,
 ) -> ModelFingerprint:
     """Sample one built-in probe repeatedly and save its response distribution.
 
@@ -102,9 +99,6 @@ def create_fingerprint(
             feature_kind=feature_kind,
             field=selected_field,
             system=system,
-            subset_size=subset_size,
-            resamples=resamples,
-            seed=seed,
             length_field=length_field,
         )
     if output is not None:
