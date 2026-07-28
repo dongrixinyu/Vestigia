@@ -1,91 +1,92 @@
-"""Build, save, load, and compare an LLM fingerprint using only Vestigia APIs.
+"""Collect and save favorite-number fingerprints for multiple model endpoints.
 
-This script selects Vestigia's built-in ``favorite_number`` probe, sends its
-first fixed wording repeatedly to a reference model, saves its response
-fingerprint, then samples a candidate model under precisely the saved request
-conditions and prints the comparison report.
+Add one dictionary to ``MODEL_ENDPOINTS`` for every direct provider or relay.
+Each endpoint is sampled independently and saved under the repository-level
+``fingerprints`` directory. This example only collects distributions; it does
+not identify or compare models.
 
-Run after filling the connection constants below::
+Run after filling the connection settings below::
 
     python examples/fingerprint_and_compare.py
-
-No manual LLM client, request loop, distribution aggregation, or JSON
-serialisation is implemented here: all of that is handled by Vestigia.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from vestigia import create_fingerprint, load_fingerprint, save_fingerprint, verify_fingerprint
+from vestigia import create_fingerprint, save_fingerprint
 
-# Fill in the reference model connection.
-LLM_BASE_URL = "https://gateway.example.com/v1"
-LLM_API_KEY = "your-reference-api-key"
-LLM_MODEL = "your-reference-model"
-LLM_PROVIDER = "openai_compatible"  # Endpoint wire protocol; or "anthropic".
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+FINGERPRINT_DIRECTORY = REPOSITORY_ROOT / "fingerprints"
 
+# Number of actual model calls per endpoint. This is the only sampling-count
+# setting exposed by create_fingerprint.
+SAMPLE_COUNT = 50
 
-
-# Fill in the model to compare against the reference.
-CANDIDATE_LLM_BASE_URL = "https://gateway.example.com/v1"
-CANDIDATE_LLM_API_KEY = "your-candidate-api-key"
-CANDIDATE_LLM_MODEL = "your-candidate-model"
-CANDIDATE_LLM_PROVIDER = "openai_compatible"  # Or "anthropic".
-
-MAX_TOKENS = 1024
-REFERENCE_COUNT = 5
-CANDIDATE_COUNT = 20
-FINGERPRINT_DIRECTORY = Path("fingerprints")
+# Add one item for each model and/or relay that should have a distribution.
+# ``provider`` controls only the endpoint's wire protocol. A relay serving an
+# Anthropic, DeepSeek, Kimi, or other model through OpenAI-compatible APIs must
+# therefore still use ``provider="openai_compatible"``.
+MODEL_ENDPOINTS: list[dict[str, Any]] = [
+    {
+        "name": "deepseek-direct",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "your-deepseek-api-key",
+        "model": "deepseek-v4-pro",
+        "provider": "openai_compatible",
+        "request_params": {
+            "temperature": 0.1,
+            "max_tokens": 1024,
+        },
+    },
+    # Example: OpenAI-compatible relay that exposes a Claude model.
+    # {
+    #     "name": "claude-through-relay-a",
+    #     "base_url": "https://relay-a.example.com/v1",
+    #     "api_key": "your-relay-a-api-key",
+    #     "model": "claude-sonnet-4-6",
+    #     "provider": "openai_compatible",
+    #     "request_params": {
+    #         "temperature": 0.1,
+    #         "max_tokens": 1024,
+    #         "extra_body": {"top_p": 0.9},
+    #     },
+    # },
+    # Example: direct Anthropic Messages API.
+    # {
+    #     "name": "claude-direct",
+    #     "base_url": "https://api.anthropic.com",
+    #     "api_key": "your-anthropic-api-key",
+    #     "model": "claude-sonnet-4-6",
+    #     "provider": "anthropic",
+    #     "request_params": {"temperature": 0.1, "max_tokens": 1024},
+    # },
+]
 
 
 def main() -> None:
-    # 1. Select one built-in prompt and call the reference model repeatedly.
-    # Vestigia uses favorite_number's parser; the field below records the
-    # normalized first number instead of the entire response text.
-    reference = create_fingerprint(
-        base_url=LLM_BASE_URL,
-        api_key=LLM_API_KEY,
-        model=LLM_MODEL,
-        provider=LLM_PROVIDER,
-        prompt_id="favorite_number",
-        variant_index=0,
-        field="parsed.first_number.value",
-        count=REFERENCE_COUNT,
-        temperature=0.1,
-        max_tokens=MAX_TOKENS,
-        # ``output`` is a directory. Vestigia chooses the configuration-specific
-        # filename: {model}__{prompt_id}__{params_hash}.json.
-        output=FINGERPRINT_DIRECTORY,
-    )
-    # save_fingerprint returns the exact canonical path chosen internally.
-    # Calling it again writes the same configuration-specific file and lets this
-    # example retain the path for a later load.
-    fingerprint_path = save_fingerprint(
-        reference, FINGERPRINT_DIRECTORY, prompt_id="favorite_number"
-    )
-    print(f"Reference fingerprint saved to: {fingerprint_path}")
-    print("Reference distribution:")
-    print(json.dumps(reference.distribution, ensure_ascii=False, indent=2))
-
-    # 2. Load the persisted reference (as a separate process would), then
-    # repeat its exact prompt and sampling controls against the candidate.
-    # The built-in probe parser is recovered automatically by verify_fingerprint.
-    persisted_reference = load_fingerprint(fingerprint_path)
-    result = verify_fingerprint(
-        persisted_reference,
-        base_url=CANDIDATE_LLM_BASE_URL,
-        api_key=CANDIDATE_LLM_API_KEY,
-        model=CANDIDATE_LLM_MODEL,
-        provider=CANDIDATE_LLM_PROVIDER,
-        count=CANDIDATE_COUNT,
-    )
-
-    # 3. The full report includes candidate distribution, TV distances,
-    # reference acceptance thresholds, and the final match decision.
-    print("\nCandidate comparison report:")
-    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-    print(f"\nMatches reference: {result.matches_reference}")
+    for endpoint in MODEL_ENDPOINTS:
+        name = str(endpoint["name"])
+        print(f"\nCollecting favorite_number distribution: {name}")
+        fingerprint = create_fingerprint(
+            base_url=str(endpoint["base_url"]),
+            api_key=str(endpoint["api_key"]),
+            model=str(endpoint["model"]),
+            provider=str(endpoint.get("provider", "openai_compatible")),
+            endpoint=endpoint.get("endpoint"),
+            prompt_id="favorite_number",
+            variant_index=0,
+            field="parsed.first_number.value",
+            count=SAMPLE_COUNT,
+            request_params=endpoint.get("request_params"),
+            output=FINGERPRINT_DIRECTORY,
+        )
+        fingerprint_path = save_fingerprint(
+            fingerprint, FINGERPRINT_DIRECTORY, prompt_id="favorite_number"
+        )
+        print(f"Saved: {fingerprint_path}")
+        print(json.dumps(fingerprint.distribution, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
