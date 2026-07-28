@@ -20,7 +20,7 @@ from vestigia.identify import (
 )
 from vestigia.llm import LLMClient, LLMConfig
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
-
+from vestigia.prompts.base import FeatureKind
 
 _REQUEST_PARAM_NAMES = frozenset(
     {
@@ -53,9 +53,7 @@ def create_fingerprint(
     output: str | Path | None = None,
     provider: str = "openai_compatible",
     endpoint: str | None = None,
-    system: str | None = None,
     request_params: Mapping[str, Any] | None = None,
-    parser: Parser | None = None,
     field: str | None = None,
     count: int = 50,
 ) -> ModelFingerprint:
@@ -80,7 +78,6 @@ def create_fingerprint(
     selected_prompt, selected_parser, feature_kind, length_field = _select_prompt(
         prompt_id=prompt_id,
         variant_index=variant_index,
-        parser=parser,
     )
     selected_field = field or "parsed"
     params = _validated_request_params(request_params)
@@ -100,7 +97,6 @@ def create_fingerprint(
             count=count,
             feature_kind=feature_kind,
             field=selected_field,
-            system=system,
         )
     if output is not None:
         save_fingerprint(fingerprint, output, prompt_id=prompt_id)
@@ -313,8 +309,7 @@ def _select_prompt(
     *,
     prompt_id: str,
     variant_index: int,
-    parser: Parser | None,
-) -> tuple[str, Parser, str, str]:
+) -> tuple[str, Parser, FeatureKind, str]:
     """Resolve one fixed wording and parser from the built-in probe catalog."""
     if variant_index < 0:
         raise ValueError("variant_index must not be negative")
@@ -327,7 +322,7 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, parser or template.parser, template.feature_kind, template.length_field
+    return selected_prompt, template.parser, template.feature_kind, template.length_field
 
 
 def _prompt_template(prompt_id: str) -> PromptTemplate:

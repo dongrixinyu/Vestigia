@@ -97,15 +97,11 @@ def build_model_fingerprint(
     field: str = "parsed",
     length_field: LengthField = "content",
     count: int = 50,
-    system: str | None = None,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
 ) -> ModelFingerprint:
     """Call a model repeatedly and build exactly one selected feature distribution."""
     _validate_count(count, "count")
     _validate_feature_kind(feature_kind)
-    request_configuration = _request_configuration(
-        client, system=system, temperature=temperature, max_tokens=max_tokens)
+    request_configuration = _request_configuration(client)
     started_at = _utc_timestamp()
     values, _ = _collect_feature_values(
         client,
@@ -115,9 +111,6 @@ def build_model_fingerprint(
         field=field,
         length_field=length_field,
         count=count,
-        system=system,
-        temperature=temperature,
-        max_tokens=max_tokens,
     )
     finished_at = _utc_timestamp()
     stability = validate_stability(
@@ -197,13 +190,13 @@ def _validate_compatible_fingerprints(
 
 
 def _request_configuration(
-    client: LLMClient, *, system: str | None, temperature: float | None, max_tokens: int | None
+    client: LLMClient,
 ) -> dict[str, Any]:
     """Return the complete request parameters recorded with a fingerprint."""
     return {
-        "system_prompt": _effective_system_prompt(system),
-        "temperature": temperature if temperature is not None else client.config.temperature,
-        "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
+        "system_prompt": SYSTEM_PROMPT,
+        "temperature": client.config.temperature,
+        "max_tokens": client.config.max_tokens,
         "top_p": getattr(client.config, "top_p", 1.0),
         "top_k": getattr(client.config, "top_k", None),
         "presence_penalty": getattr(client.config, "presence_penalty", 0.0),
@@ -228,16 +221,11 @@ def _collect_feature_values(
     field: str,
     length_field: LengthField,
     count: int,
-    system: str | None,
-    temperature: float | None,
-    max_tokens: int | None,
 ) -> tuple[list[str], list[int] | None]:
     values: list[str] = []
     raw_lengths: list[int] | None = [] if feature_kind == "length" else None
     for _ in range(count):
-        response: LLMResponse = client.complete(
-            prompt, system=system, temperature=temperature, max_tokens=max_tokens
-        )
+        response: LLMResponse = client.complete(prompt)
         if feature_kind == "parsed":
             parsed = parser(response.content)
             values.append(_distribution_value(resolve_field({"parsed": parsed}, field)))
