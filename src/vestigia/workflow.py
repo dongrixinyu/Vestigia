@@ -20,6 +20,22 @@ from vestigia.llm import LLMClient, LLMConfig
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate
 
 
+_REQUEST_PARAM_NAMES = frozenset(
+    {
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "top_k",
+        "presence_penalty",
+        "frequency_penalty",
+        "reasoning",
+        "reasoning_effort",
+        "extra_body",
+        "extra_headers",
+    }
+)
+
+
 def text_parser(content: str) -> dict[str, str]:
     """Default feature parser: compare the complete response text."""
     return {"text": content}
@@ -36,16 +52,7 @@ def create_fingerprint(
     provider: str = "openai_compatible",
     endpoint: str | None = None,
     system: str | None = None,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-    top_p: float | None = None,
-    top_k: int | None = None,
-    presence_penalty: float | None = None,
-    frequency_penalty: float | None = None,
-    reasoning: Mapping[str, Any] | None = None,
-    reasoning_effort: str | None = None,
-    extra_body: Mapping[str, Any] | None = None,
-    extra_headers: Mapping[str, str] | None = None,
+    request_params: Mapping[str, Any] | None = None,
     parser: Parser | None = None,
     field: str | None = None,
     count: int = 50,
@@ -63,9 +70,10 @@ def create_fingerprint(
     fingerprint identity or filename.
 
     ``base_url``, ``api_key`` and ``model`` are the required connection values.
-    Sampling controls accepted by the target API belong in ``temperature``,
-    ``max_tokens`` and ``extra_body``. The saved JSON can be passed directly to
-    :func:`verify_fingerprint` after loading with :func:`load_fingerprint`.
+    Put all model request controls in ``request_params``, for example
+    ``{"temperature": 0.1, "max_tokens": 64, "top_p": 0.9}``. The saved
+    JSON can be passed directly to :func:`verify_fingerprint` after loading
+    with :func:`load_fingerprint`.
     """
     selected_prompt, selected_parser, feature_kind, length_field = _select_prompt(
         prompt_id=prompt_id,
@@ -73,22 +81,14 @@ def create_fingerprint(
         parser=parser,
     )
     selected_field = field or "parsed"
+    params = _validated_request_params(request_params)
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
         base_url=base_url,
         api_key=api_key,
         model=model,
         endpoint=endpoint,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        top_p=top_p,
-        top_k=top_k,
-        presence_penalty=presence_penalty,
-        frequency_penalty=frequency_penalty,
-        reasoning=reasoning,
-        reasoning_effort=reasoning_effort,
-        extra_body=extra_body or {},
-        extra_headers=extra_headers or {},
+        **params,
     )
     with LLMClient(config) as client:
         fingerprint = build_model_fingerprint(
@@ -114,15 +114,16 @@ def verify_fingerprint(
     model: str,
     provider: str = "openai_compatible",
     endpoint: str | None = None,
-    extra_body: Mapping[str, Any] | None = None,
-    extra_headers: Mapping[str, str] | None = None,
+    request_params: Mapping[str, Any] | None = None,
     parser: Parser | None = None,
     count: int = 20,
 ) -> FingerprintTestResult:
     """Repeat the reference request against another model and compare it.
 
     The reference prompt, system instruction, token limit, temperature and
-    feature field are reused automatically. The probe parser is recovered from
+    feature field are reused automatically. ``request_params`` may contain
+    explicit request-control overrides; each must match the reference
+    fingerprint's saved sampling configuration. The probe parser is recovered from
     the built-in prompt catalog; pass ``parser`` only to explicitly override
     it. ``extra_body`` must contain the same sampling controls as the reference
     default. Pass ``extra_body`` only to explicitly override them; a mismatch
@@ -130,29 +131,49 @@ def verify_fingerprint(
     """
     reference = _coerce_fingerprint(fingerprint)
     selected_parser = parser or _parser_for_fingerprint(reference)
+    params = _reference_request_params(reference)
+    params.update(_validated_request_params(request_params))
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
         base_url=base_url,
         api_key=api_key,
         model=model,
         endpoint=endpoint,
-        temperature=reference.temperature,
-        max_tokens=reference.max_tokens,
-        top_p=reference.request_configuration.get("top_p"),
-        top_k=reference.request_configuration.get("top_k"),
-        presence_penalty=reference.request_configuration.get("presence_penalty"),
-        frequency_penalty=reference.request_configuration.get("frequency_penalty"),
-        reasoning=reference.request_configuration.get("reasoning"),
-        reasoning_effort=reference.request_configuration.get("reasoning_effort"),
-        extra_body=(
-            extra_body
-            if extra_body is not None
-            else dict(reference.request_configuration.get("extra_body", {}))
-        ),
-        extra_headers=extra_headers or {},
+        **params,
     )
     with LLMClient(config) as client:
         return test_model_against_fingerprint(client, reference, selected_parser, count=count)
+
+
+def _validated_request_params(request_params: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Validate and normalize the unified model request controls."""
+    if request_params is None:
+        return {}
+    unknown = request_params.keys() - _REQUEST_PARAM_NAMES
+    if unknown:
+        raise ValueError(f"unsupported request_params keys: {', '.join(sorted(unknown))}")
+    params = dict(request_params)
+    if "extra_body" in params:
+        params["extra_body"] = dict(params["extra_body"] or {})
+    if "extra_headers" in params:
+        params["extra_headers"] = dict(params["extra_headers"] or {})
+    return params
+
+
+def _reference_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
+    """Recover the reference fingerprint's request controls for verification."""
+    configuration = fingerprint.request_configuration
+    return {
+        "temperature": fingerprint.temperature,
+        "max_tokens": fingerprint.max_tokens,
+        "top_p": configuration.get("top_p"),
+        "top_k": configuration.get("top_k"),
+        "presence_penalty": configuration.get("presence_penalty"),
+        "frequency_penalty": configuration.get("frequency_penalty"),
+        "reasoning": configuration.get("reasoning"),
+        "reasoning_effort": configuration.get("reasoning_effort"),
+        "extra_body": dict(configuration.get("extra_body", {})),
+    }
 
 
 def save_fingerprint(

@@ -251,9 +251,11 @@ reference = create_fingerprint(
     # output 是目录；实际文件由库生成：
     # {provider}__{model}__{prompt_id}__{params_hash}.json
     output="fingerprints",
-    temperature=0.1,
-    max_tokens=64,
-    extra_body={"top_p": 0.9, "seed": 42},
+    request_params={
+        "temperature": 0.1,
+        "max_tokens": 64,
+        "extra_body": {"top_p": 0.9, "seed": 42},
+    },
 )
 
 # create_fingerprint 返回生成的指纹；save_fingerprint 也会返回实际保存路径。

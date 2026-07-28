@@ -9,6 +9,7 @@ from typing import Any
 
 from vestigia.prompts.base import PromptTemplate
 
+
 _ARABIC_NUMBER = re.compile(r"(?<![\w.])([+-]?\d+(?:\.\d+)?)(?![\w.])")
 _CHINESE_NUMBER = re.compile(
     r"(?<![一二三四五六七八九十百千万亿兆零〇两負负正点])"
