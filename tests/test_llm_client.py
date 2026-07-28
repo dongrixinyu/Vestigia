@@ -44,7 +44,6 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
         top_p=1.0,
         presence_penalty=0.0,
         frequency_penalty=0.0,
-        reasoning_effort="high",
     )
     assert response.content == "final answer"
     assert response.reasoning_content is None

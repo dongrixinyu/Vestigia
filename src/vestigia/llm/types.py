@@ -34,7 +34,7 @@ class LLMConfig:
     presence_penalty: float | None = 0.0
     frequency_penalty: float | None = 0.0
     reasoning: bool | Mapping[str, Any] | None = None
-    reasoning_effort: str | None = "high"
+    reasoning_effort: str | None = None
     api_version: str = "2023-06-01"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     extra_body: Mapping[str, Any] = field(default_factory=dict)

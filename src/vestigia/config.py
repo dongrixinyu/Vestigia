@@ -11,6 +11,10 @@ from typing import Any
 # or disables it; a mapping passes provider-specific reasoning options (for
 # example a budget or effort object). Keep it ``None`` by default: forcing
 # reasoning on changes behavior/cost and is unsupported by many endpoints.
+# ``reasoning_effort`` is also omitted by default. Although ``high`` is a
+# common semantic default for reasoning-capable APIs, OpenAI-compatible
+# gateways such as DeepSeek may reject the field outright. Set it explicitly
+# only for an endpoint confirmed to support it.
 DEFAULT_REQUEST_PARAMS: dict[str, Any] = {
     "temperature": 1.0,
     "max_tokens": None,
@@ -19,7 +23,7 @@ DEFAULT_REQUEST_PARAMS: dict[str, Any] = {
     "presence_penalty": 0.0,
     "frequency_penalty": 0.0,
     "reasoning": None,
-    "reasoning_effort": "high",
+    "reasoning_effort": None,
     "extra_body": {},
     "extra_headers": {},
 }
