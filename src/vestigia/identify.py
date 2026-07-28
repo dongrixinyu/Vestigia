@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from vestigia.config import (
@@ -50,6 +51,8 @@ class ModelFingerprint:
     distribution: Mapping[str, float]
     stability: Mapping[str, Any]
     length_statistics: Mapping[str, float] | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -110,6 +113,7 @@ def build_model_fingerprint(
     _validate_feature_kind(feature_kind)
     request_configuration = _request_configuration(
         client, temperature=temperature, max_tokens=max_tokens)
+    started_at = _utc_timestamp()
     values, raw_lengths = _collect_feature_values(
         client,
         prompt,
@@ -122,6 +126,7 @@ def build_model_fingerprint(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    finished_at = _utc_timestamp()
     stability = validate_stability(
         values,
         sample_size=min(STABILITY_SUBSET_SIZE, len(values)),
@@ -132,7 +137,7 @@ def build_model_fingerprint(
     return ModelFingerprint(
         model=client.config.model,
         prompt=prompt,
-        system=system,
+        system=_effective_system_prompt(system),
         temperature=temperature if temperature is not None else client.config.temperature,
         max_tokens=max_tokens if max_tokens is not None else client.config.max_tokens,
         request_configuration=request_configuration,
@@ -143,7 +148,23 @@ def build_model_fingerprint(
         distribution=distribution(values),
         stability=stability,
         length_statistics=text_length_summary(raw_lengths) if raw_lengths is not None else None,
+        started_at=started_at,
+        finished_at=finished_at,
     )
+
+
+def _effective_system_prompt(system: str | None) -> str:
+    """Return the mandatory system instruction actually sent by ``LLMClient``."""
+    if system is None or system == SYSTEM_PROMPT:
+        return SYSTEM_PROMPT
+    if system.startswith(f"{SYSTEM_PROMPT}\n\n"):
+        return system
+    return f"{SYSTEM_PROMPT}\n\n{system}"
+
+
+def _utc_timestamp() -> str:
+    """Return an unambiguous RFC 3339 timestamp in UTC."""
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def compare_fingerprint_to_reference(
@@ -253,6 +274,7 @@ def _request_configuration(
         "temperature": temperature if temperature is not None else client.config.temperature,
         "max_tokens": max_tokens if max_tokens is not None else client.config.max_tokens,
         "extra_body": dict(getattr(client.config, "extra_body", {})),
+        "extra_headers": dict(getattr(client.config, "extra_headers", {})),
         "top_p": getattr(client.config, "top_p", None),
         "top_k": getattr(client.config, "top_k", None),
         "presence_penalty": getattr(client.config, "presence_penalty", None),

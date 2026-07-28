@@ -34,6 +34,14 @@ class LLMClient:
     def close(self) -> None:
         """Compatibility no-op; LiteLLM owns request resources."""
 
+    def effective_system_prompt(self, system: str | None = None) -> str:
+        """Return the mandatory system instruction actually sent to the model."""
+        if system is None or system == SYSTEM_PROMPT:
+            return SYSTEM_PROMPT
+        if system.startswith(f"{SYSTEM_PROMPT}\n\n"):
+            return system
+        return f"{SYSTEM_PROMPT}\n\n{system}"
+
     def request_signature_context(
         self,
         prompt: str,
@@ -145,7 +153,7 @@ class LLMClient:
         max_tokens: int | None,
     ) -> dict[str, Any]:
         request_messages = [dict(message) for message in messages]
-        system_prompt = SYSTEM_PROMPT if system is None else f"{SYSTEM_PROMPT}\n\n{system}"
+        system_prompt = self.effective_system_prompt(system)
         request_messages.insert(0, {"role": "system", "content": system_prompt})
         options: dict[str, Any] = {
             "model": self._litellm_model(),
@@ -182,7 +190,11 @@ class LLMClient:
             "top_k": self.config.top_k,
             "presence_penalty": self.config.presence_penalty,
             "frequency_penalty": self.config.frequency_penalty,
-            "reasoning": dict(self.config.reasoning) if self.config.reasoning is not None else None,
+            "reasoning": (
+                dict(self.config.reasoning)
+                if isinstance(self.config.reasoning, Mapping)
+                else self.config.reasoning
+            ),
             "reasoning_effort": self.config.reasoning_effort,
         }
         options.update({name: value for name, value in values.items() if value is not None})

@@ -1,5 +1,29 @@
 """Application-wide runtime settings."""
 
+from typing import Any
+
+# Complete model-request parameter set. These values are sent to the endpoint
+# and recorded in every fingerprint. ``None`` means the parameter is omitted
+# because it has no portable value across providers.
+#
+# ``reasoning`` supports three forms because provider adapters expose different
+# APIs: ``None`` leaves reasoning mode untouched; ``bool`` explicitly enables
+# or disables it; a mapping passes provider-specific reasoning options (for
+# example a budget or effort object). Keep it ``None`` by default: forcing
+# reasoning on changes behavior/cost and is unsupported by many endpoints.
+DEFAULT_REQUEST_PARAMS: dict[str, Any] = {
+    "temperature": 1.0,
+    "max_tokens": None,
+    "top_p": 1.0,
+    "top_k": None,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "reasoning": None,
+    "reasoning_effort": "high",
+    "extra_body": {},
+    "extra_headers": {},
+}
+
 # Standard instruction prepended to every LLM request. Keep this value stable
 # while collecting and comparing fingerprints; changing it changes the model's
 # behavior and therefore produces a different fingerprint.

@@ -28,13 +28,13 @@ class LLMConfig:
     endpoint: str | None = None
     timeout: float = 60.0
     max_tokens: int | None = None
-    temperature: float | None = None
-    top_p: float | None = None
+    temperature: float | None = 1.0
+    top_p: float | None = 1.0
     top_k: int | None = None
-    presence_penalty: float | None = None
-    frequency_penalty: float | None = None
-    reasoning: Mapping[str, Any] | None = None
-    reasoning_effort: str | None = None
+    presence_penalty: float | None = 0.0
+    frequency_penalty: float | None = 0.0
+    reasoning: bool | Mapping[str, Any] | None = None
+    reasoning_effort: str | None = "high"
     api_version: str = "2023-06-01"
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     extra_body: Mapping[str, Any] = field(default_factory=dict)
@@ -52,14 +52,24 @@ class LLMConfig:
             raise ValueError("timeout must be greater than zero")
         if self.max_tokens is not None and self.max_tokens <= 0:
             raise ValueError("max_tokens must be greater than zero")
+        if self.temperature is not None and not 0 <= self.temperature <= 2:
+            raise ValueError("temperature must be between zero and two")
         if self.top_p is not None and not 0 <= self.top_p <= 1:
             raise ValueError("top_p must be between zero and one")
-        if self.top_k is not None and self.top_k <= 0:
-            raise ValueError("top_k must be greater than zero")
-        if self.reasoning is not None and not isinstance(self.reasoning, Mapping):
-            raise ValueError("reasoning must be a mapping")
-        if self.reasoning_effort is not None and not self.reasoning_effort.strip():
-            raise ValueError("reasoning_effort must not be empty")
+        if self.top_k is not None and self.top_k < 0:
+            raise ValueError("top_k must be greater than or equal to zero")
+        for name, value in (
+            ("presence_penalty", self.presence_penalty),
+            ("frequency_penalty", self.frequency_penalty),
+        ):
+            if value is not None and not -2 <= value <= 2:
+                raise ValueError(f"{name} must be between -2 and 2")
+        if self.reasoning is not None and not isinstance(self.reasoning, (bool, Mapping)):
+            raise ValueError("reasoning must be a bool or mapping")
+        if self.reasoning_effort is not None and self.reasoning_effort not in {
+            "minimal", "low", "medium", "high", "xhigh", "max"
+        }:
+            raise ValueError("reasoning_effort must be minimal, low, medium, high, xhigh, or max")
         forbidden_body_fields = {"n", "stream"} & self.extra_body.keys()
         if forbidden_body_fields:
             raise ValueError(

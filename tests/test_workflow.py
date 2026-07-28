@@ -34,6 +34,18 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
     payload = json.loads(output.read_text("utf-8"))
     assert payload["prompt_id"] == "custom_probe"
     assert len(payload["parameters_hash"]) == 16
+    assert payload["effective_request_params"] == {
+        "temperature": 0.1,
+        "max_tokens": 16,
+        "top_p": 1.0,
+        "top_k": None,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "reasoning": None,
+        "reasoning_effort": "high",
+        "extra_body": {"top_p": 0.9},
+        "extra_headers": {},
+    }
     assert load_fingerprint(output) == fingerprint
 
 

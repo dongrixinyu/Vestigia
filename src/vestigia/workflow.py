@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from vestigia.config import DEFAULT_REQUEST_PARAMS
 from vestigia.identify import (
     FingerprintIdentificationResult,
     FingerprintTestResult,
@@ -34,7 +35,7 @@ _REQUEST_PARAM_NAMES = frozenset(
         "reasoning_effort",
         "extra_body",
         "extra_headers",
-    }
+}
 )
 
 
@@ -181,12 +182,16 @@ def _load_fingerprint_directory(directory: str | Path) -> tuple[ModelFingerprint
 
 def _validated_request_params(request_params: Mapping[str, Any] | None) -> dict[str, Any]:
     """Validate and normalize the unified model request controls."""
+    params: dict[str, Any] = {
+        key: (dict(value) if isinstance(value, Mapping) else value)
+        for key, value in DEFAULT_REQUEST_PARAMS.items()
+    }
     if request_params is None:
-        return {}
+        return params
     unknown = request_params.keys() - _REQUEST_PARAM_NAMES
     if unknown:
         raise ValueError(f"unsupported request_params keys: {', '.join(sorted(unknown))}")
-    params = dict(request_params)
+    params.update(request_params)
     if "extra_body" in params:
         params["extra_body"] = dict(params["extra_body"] or {})
     if "extra_headers" in params:
@@ -207,6 +212,7 @@ def _reference_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
         "reasoning": configuration.get("reasoning"),
         "reasoning_effort": configuration.get("reasoning_effort"),
         "extra_body": dict(configuration.get("extra_body", {})),
+        "extra_headers": dict(configuration.get("extra_headers", {})),
     }
 
 
@@ -219,7 +225,7 @@ def save_fingerprint(
     """Persist a fingerprint under a canonical, configuration-specific filename.
 
     ``output_directory`` is always treated as a directory. The filename is
-    ``{model}__{prompt_id}__{params_hash}.json`` so fingerprints produced
+    ``{model}__{prompt_id}__{params_hash}__{started_at}.json`` so fingerprints produced
     under different model or request settings cannot overwrite one another. Callers saving an existing fingerprint may omit ``prompt_id``;
     in that case it is recovered from the built-in prompt catalog.
     """
@@ -230,6 +236,7 @@ def save_fingerprint(
             _filename_component(fingerprint.model),
             _filename_component(resolved_prompt_id),
             params_hash,
+            _timestamp_filename_component(fingerprint.started_at),
         )
     ) + ".json"
     path = Path(output_directory) / filename
@@ -237,8 +244,28 @@ def save_fingerprint(
     payload = fingerprint.to_dict()
     payload["prompt_id"] = resolved_prompt_id
     payload["parameters_hash"] = params_hash
+    payload["effective_request_params"] = _effective_request_params(fingerprint)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", "utf-8")
     return path
+
+
+def _effective_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
+    """Return every effective request parameter, including unsent defaults."""
+    configuration = fingerprint.request_configuration
+    effective = {
+        key: (dict(value) if isinstance(value, Mapping) else value)
+        for key, value in DEFAULT_REQUEST_PARAMS.items()
+    }
+    effective.update(
+        {
+            "temperature": fingerprint.temperature,
+            "max_tokens": fingerprint.max_tokens,
+            **{key: configuration[key] for key in _REQUEST_PARAM_NAMES if key in configuration},
+        }
+    )
+    for key in ("extra_body", "extra_headers"):
+        effective[key] = dict(effective[key] or {})
+    return effective
 
 
 def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
@@ -253,6 +280,13 @@ def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
     }
     canonical = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _timestamp_filename_component(timestamp: str | None) -> str:
+    """Make an RFC 3339 timestamp safe for use in a filename."""
+    if timestamp is None:
+        return "unknown-time"
+    return timestamp.replace(":", "-")
 
 
 def _filename_component(value: str) -> str:
@@ -357,4 +391,6 @@ def _coerce_fingerprint(value: ModelFingerprint | Mapping[str, Any]) -> ModelFin
             if isinstance(value.get("length_statistics"), Mapping)
             else None
         ),
+        started_at=str(value["started_at"]) if isinstance(value.get("started_at"), str) else None,
+        finished_at=str(value["finished_at"]) if isinstance(value.get("finished_at"), str) else None,
     )
