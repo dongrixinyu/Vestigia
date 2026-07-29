@@ -9,7 +9,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from vestigia.config import DEFAULT_REQUEST_PARAMS, SYSTEM_PROMPT
 from vestigia.identify import (
@@ -40,12 +40,20 @@ _REQUEST_PARAM_NAMES = frozenset(
 )
 
 
+DistanceType = Literal["total_variation", "jensen_shannon"]
+_DISTANCE_KEYS: dict[DistanceType, str] = {
+    "total_variation": "total_variation_distance",
+    "jensen_shannon": "jensen_shannon_distance",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class ObservedDistributionMatch:
-    """Closest saved fingerprint and score for one historical model."""
+    """Closest saved fingerprint and both distances for one historical model."""
 
     model: str
     total_variation_distance: float
+    jensen_shannon_distance: float
     probability: float
     fingerprint_path: Path
 
@@ -53,6 +61,7 @@ class ObservedDistributionMatch:
         return {
             "model": self.model,
             "total_variation_distance": self.total_variation_distance,
+            "jensen_shannon_distance": self.jensen_shannon_distance,
             "probability": self.probability,
             "fingerprint_path": str(self.fingerprint_path),
         }
@@ -60,15 +69,17 @@ class ObservedDistributionMatch:
 
 @dataclass(frozen=True, slots=True)
 class ObservedDistributionIdentification:
-    """Offline identification result for externally collected sample values."""
+    """Offline prediction result for externally collected sample values."""
 
     values: tuple[str, ...]
     matches: tuple[ObservedDistributionMatch, ...]
+    distance_type: DistanceType
     softmax_temperature: float
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "values": list(self.values),
+            "distance_type": self.distance_type,
             "softmax_temperature": self.softmax_temperature,
             "matches": [match.to_dict() for match in self.matches],
         }
@@ -198,18 +209,24 @@ def identify_fingerprint(
     )
 
 
-def identify_observed_distribution(
+def predict_distribution(
     values: list[str] | tuple[str, ...],
     reference_directory: str | Path,
     *,
+    distance_type: DistanceType = "total_variation",
     softmax_temperature: float = 0.1,
 ) -> ObservedDistributionIdentification:
-    """Identify externally collected values against saved fingerprints offline.
+    """Rank saved fingerprints against externally collected values offline.
 
-    The score is ``softmax(-TV_distance / softmax_temperature)``. It ranks
-    relative similarity only; it is not a calibrated model-identity probability.
-    When a model has multiple saved fingerprints, its closest one is used.
+    ``distance_type`` selects the metric used to choose each model's closest
+    reference, rank models, and calculate the softmax relative score. Every
+    returned match always includes both total-variation and Jensen-Shannon
+    distances. The score is a relative similarity, not a calibrated
+    model-identity probability.
     """
+    if distance_type not in _DISTANCE_KEYS:
+        supported = ", ".join(sorted(_DISTANCE_KEYS))
+        raise ValueError(f"unsupported distance_type {distance_type!r}; expected one of: {supported}")
     observed = tuple(str(value) for value in values)
     if not observed:
         raise ValueError("values must not be empty")
@@ -221,37 +238,43 @@ def identify_observed_distribution(
     if not paths:
         raise ValueError(f"fingerprint directory contains no JSON fingerprints: {directory}")
 
-    closest_by_model: dict[str, tuple[float, Path]] = {}
+    distance_key = _DISTANCE_KEYS[distance_type]
+    closest_by_model: dict[str, tuple[dict[str, float], Path]] = {}
     for path in paths:
         reference = load_fingerprint(path)
-        distance = compare_distributions(reference.values, observed)["total_variation_distance"]
+        distances = compare_distributions(reference.values, observed)
         previous = closest_by_model.get(reference.model)
-        if previous is None or distance < previous[0]:
-            closest_by_model[reference.model] = (distance, path)
+        if previous is None or distances[distance_key] < previous[0][distance_key]:
+            closest_by_model[reference.model] = (distances, path)
 
     scored = sorted(
-        ((model, distance, path) for model, (distance, path) in closest_by_model.items()),
-        key=lambda item: item[1],
+        ((model, distances, path) for model, (distances, path) in closest_by_model.items()),
+        key=lambda item: item[1][distance_key],
     )
-    logits = [-distance / softmax_temperature for _, distance, _ in scored]
+    logits = [-distances[distance_key] / softmax_temperature for _, distances, _ in scored]
     maximum = max(logits)
     weights = [math.exp(logit - maximum) for logit in logits]
     normalizer = sum(weights)
     matches = tuple(
         ObservedDistributionMatch(
             model=model,
-            total_variation_distance=distance,
+            total_variation_distance=distances["total_variation_distance"],
+            jensen_shannon_distance=distances["jensen_shannon_distance"],
             probability=weight / normalizer,
             fingerprint_path=path,
         )
-        for (model, distance, path), weight in zip(scored, weights, strict=True)
+        for (model, distances, path), weight in zip(scored, weights, strict=True)
     )
     return ObservedDistributionIdentification(
-        values=observed, matches=matches, softmax_temperature=softmax_temperature
+        values=observed,
+        matches=matches,
+        distance_type=distance_type,
+        softmax_temperature=softmax_temperature,
     )
 
 
-
+def _load_fingerprint_directory(directory: str | Path) -> tuple[ModelFingerprint, ...]:
+    """Load all persisted fingerprints from an existing directory."""
     path = Path(directory)
     if not path.is_dir():
         raise ValueError(f"fingerprint directory does not exist: {path}")

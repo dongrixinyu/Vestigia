@@ -23,10 +23,10 @@ def distribution(values: Iterable[str]) -> dict[str, float]:
 
 def total_variation_distance(left: Mapping[str, float], right: Mapping[str, float]) -> float:
     """Return total-variation distance (0 identical, 1 disjoint)."""
-    return (
+    ret = (
         sum(abs(left.get(key, 0.0) - right.get(key, 0.0)) for key in left.keys() | right.keys()) / 2
     )
-
+    return ret
 
 def jensen_shannon_distance(left: Mapping[str, float], right: Mapping[str, float]) -> float:
     """Return Jensen-Shannon distance in [0, 1], using base-2 logarithms."""
@@ -40,7 +40,8 @@ def jensen_shannon_distance(left: Mapping[str, float], right: Mapping[str, float
             for key, probability in source.items()
         )
 
-    return math.sqrt((kl(left) + kl(right)) / 2)
+    ret = math.sqrt((kl(left) + kl(right)) / 2)
+    return ret
 
 
 def percentile(values: Sequence[float], fraction: float) -> float:

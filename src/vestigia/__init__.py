@@ -14,8 +14,8 @@ from vestigia.workflow import (
     ObservedDistributionMatch,
     create_fingerprint,
     identify_fingerprint,
-    identify_observed_distribution,
     load_fingerprint,
+    predict_distribution,
     save_fingerprint,
     text_parser,
 )
@@ -36,8 +36,8 @@ __all__ = [
     "compare_fingerprint_to_reference",
     "create_fingerprint",
     "identify_fingerprint",
-    "identify_observed_distribution",
     "load_fingerprint",
+    "predict_distribution",
     "save_fingerprint",
     "text_parser",
 ]
