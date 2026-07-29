@@ -136,7 +136,14 @@ class LLMClient:
                 status_code=status_code if isinstance(status_code, int) else None,
                 response_body=str(response_body) if response_body is not None else None,
             ) from exc
-        return self._normalize(response)
+        normalized = self._normalize(response)
+        logger.info(
+            "LLM request succeeded (model={}, endpoint={}, request_id={})",
+            normalized.model,
+            self.config.endpoint or self.config.base_url,
+            normalized.request_id or "unknown",
+        )
+        return normalized
 
     def _completion_with_network_retries(self, request: Mapping[str, Any]) -> Any:
         """Call LiteLLM, retrying only transient network connection failures."""

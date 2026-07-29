@@ -8,8 +8,9 @@ from vestigia import LLMClient, LLMConfig, LLMRequestError
 from vestigia.config import SYSTEM_PROMPT
 
 
+@patch("vestigia.llm.client.logger.info")
 @patch("vestigia.llm.client.litellm.completion")
-def test_client_routes_openai_compatible_request_through_litellm(completion) -> None:
+def test_client_routes_openai_compatible_request_through_litellm(completion, info_log) -> None:
     completion.return_value = {
         "id": "chatcmpl_123",
         "model": "gateway-model",
@@ -53,6 +54,12 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
     assert response.reasoning_content is None
     assert response.model == "gateway-model"
     assert response.request_id == "chatcmpl_123"
+    info_log.assert_called_once_with(
+        "LLM request succeeded (model={}, endpoint={}, request_id={})",
+        "gateway-model",
+        "https://gateway.example/v1",
+        "chatcmpl_123",
+    )
 
 
 def test_client_injects_standard_system_prompt_when_no_custom_system_is_given() -> None:
