@@ -126,6 +126,7 @@ def create_fingerprint(
         variant_index=variant_index,
     )
     selected_field = selected_field if feature_kind == "parsed" else "parsed"
+    system = _prompt_template(prompt_id).system
     params = _validated_request_params(request_params)
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
@@ -143,6 +144,7 @@ def create_fingerprint(
             count=count,
             feature_kind=feature_kind,
             field=selected_field,
+            system=system,
         )
     if output is not None:
         save_fingerprint(fingerprint, output, prompt_id=prompt_id)
@@ -176,6 +178,7 @@ def identify_fingerprint(
         compare_fingerprint_to_reference(template, reference)
 
     selected_parser = parser or _parser_for_fingerprint(template)
+    system = _system_for_fingerprint(template)
     params = _reference_request_params(template)
     params.update(_validated_request_params(request_params))
     config = LLMConfig(
@@ -194,6 +197,7 @@ def identify_fingerprint(
             feature_kind=template.feature_kind,
             field=template.field or "parsed",
             count=count,
+            system=system,
         )
 
     comparisons = tuple(
@@ -416,6 +420,13 @@ def _parser_for_fingerprint(fingerprint: ModelFingerprint) -> Parser:
     return matching_templates[0].parser
 
 
+def _system_for_fingerprint(fingerprint: ModelFingerprint) -> str | None:
+    """Recover a built-in probe's system instruction for a saved fingerprint."""
+    matching_templates = [
+        template for template in DEFAULT_PROMPTS if fingerprint.prompt in template.variants
+    ]
+    return matching_templates[0].system if len(matching_templates) == 1 else None
+
 def _select_prompt(
     *,
     prompt_id: str,
@@ -433,7 +444,13 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, template.parser, template.field, template.feature_kind, template.length_field
+    return (
+        selected_prompt,
+        template.parser,
+        template.field,
+        template.feature_kind,
+        template.length_field,
+    )
 
 
 def _prompt_template(prompt_id: str) -> PromptTemplate:

@@ -99,11 +99,12 @@ def build_model_fingerprint(
     field: str = "parsed",
     length_field: LengthField = "content",
     count: int = 50,
+    system: str | None = None,
 ) -> ModelFingerprint:
     """Call a model repeatedly and build exactly one selected feature distribution."""
     _validate_count(count, "count")
     _validate_feature_kind(feature_kind)
-    request_configuration = _request_configuration(client)
+    request_configuration = _request_configuration(client, system)
     started_at = _utc_timestamp()
     values, _ = _collect_feature_values(
         client,
@@ -113,6 +114,7 @@ def build_model_fingerprint(
         field=field,
         length_field=length_field,
         count=count,
+        system=system,
     )
     finished_at = _utc_timestamp()
     stability = validate_stability(
@@ -192,11 +194,11 @@ def _validate_compatible_fingerprints(
 
 
 def _request_configuration(
-    client: LLMClient,
+    client: LLMClient, system: str | None = None
 ) -> dict[str, Any]:
     """Return the complete request parameters recorded with a fingerprint."""
     return {
-        "system_prompt": SYSTEM_PROMPT,
+        "system_prompt": _effective_system_prompt(system),
         "temperature": client.config.temperature,
         "max_tokens": client.config.max_tokens,
         "top_p": getattr(client.config, "top_p", 1.0),
@@ -217,6 +219,7 @@ def _collect_feature_values(
     field: str,
     length_field: LengthField,
     count: int,
+    system: str | None = None,
 ) -> tuple[list[str], list[int] | None]:
     values: list[str] = []
     raw_lengths: list[int] | None = [] if feature_kind == "length" else None
@@ -225,7 +228,12 @@ def _collect_feature_values(
         # deterministic with respect to request sequence even though requests
         # within one batch run concurrently.
         with ThreadPoolExecutor(max_workers=batch_size) as executor:
-            responses = executor.map(lambda _: client.complete(prompt), range(batch_size))
+            if system is None:
+                responses = executor.map(lambda _: client.complete(prompt), range(batch_size))
+            else:
+                responses = executor.map(
+                    lambda _: client.complete(prompt, system=system), range(batch_size)
+                )
             for response in responses:
                 if feature_kind == "parsed":
                     parsed = parser(response.content)

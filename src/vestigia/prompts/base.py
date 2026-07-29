@@ -22,6 +22,7 @@ class PromptTemplate:
     variants: tuple[str, ...]
     parser: Parser
     checker: Checker
+    system: str | None = None
     field: str = "parsed"
     feature_kind: FeatureKind = "parsed"
     length_field: LengthField = "content"
