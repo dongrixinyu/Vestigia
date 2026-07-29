@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from vestigia.config import SYSTEM_PROMPT
@@ -7,10 +9,10 @@ from vestigia.identify import ModelFingerprint
 from vestigia.workflow import predict_distribution, save_fingerprint
 
 
-def _fingerprint(model: str, values: tuple[str, ...]) -> ModelFingerprint:
+def _fingerprint(model: str, prompt: str, values: tuple[str, ...]) -> ModelFingerprint:
     return ModelFingerprint(
         model=model,
-        prompt="favorite number",
+        prompt=prompt,
         request_configuration={
             "system_prompt": SYSTEM_PROMPT,
             "temperature": 1.0,
@@ -19,8 +21,6 @@ def _fingerprint(model: str, values: tuple[str, ...]) -> ModelFingerprint:
             "top_k": None,
             "presence_penalty": 0.0,
             "frequency_penalty": 0.0,
-            "reasoning": None,
-            "reasoning_effort": None,
             "extra_body": {},
             "extra_headers": {},
         },
@@ -32,37 +32,57 @@ def _fingerprint(model: str, values: tuple[str, ...]) -> ModelFingerprint:
     )
 
 
-def test_distribution_prediction_supports_both_distance_types(tmp_path) -> None:
-    save_fingerprint(_fingerprint("model-a", ("142",) * 10), tmp_path, prompt_id="favorite_number")
-    save_fingerprint(_fingerprint("model-b", ("198",) * 10), tmp_path, prompt_id="favorite_number")
+def _save(tmp_path, model: str, prompt_id: str, prompt: str, values: tuple[str, ...]) -> str:
+    path = save_fingerprint(_fingerprint(model, prompt, values), tmp_path, prompt_id=prompt_id)
+    return json.loads(path.read_text("utf-8"))["parameters_hash"]
 
-    tv_result = predict_distribution(
-        ["142"] * 8 + ["198"] * 2,
+
+def test_distribution_prediction_aggregates_matching_features_per_model(tmp_path) -> None:
+    favorite_hash = _save(tmp_path, "model-a", "favorite_number", "favorite prompt", ("142",) * 10)
+    _save(tmp_path, "model-b", "favorite_number", "favorite prompt", ("198",) * 10)
+    identity_hash = _save(tmp_path, "model-a", "model_identity", "identity prompt", ("gpt",) * 10)
+    _save(tmp_path, "model-b", "model_identity", "identity prompt", ("claude",) * 10)
+
+    result = predict_distribution(
+        [
+            {"prompt_id": "favorite_number", "params_hash": favorite_hash, "values": ["142"] * 8 + ["198"] * 2},
+            {"prompt_id": "model_identity", "params_hash": identity_hash, "values": ["gpt"] * 9 + ["claude"]},
+        ],
         tmp_path,
         distance_type="total_variation",
         softmax_temperature=0.1,
     )
-    js_result = predict_distribution(
-        ["142"] * 8 + ["198"] * 2,
-        tmp_path,
-        distance_type="jensen_shannon",
-        softmax_temperature=0.1,
-    )
 
-    assert tv_result.distance_type == "total_variation"
-    assert tv_result.matches[0].model == "model-a"
-    assert tv_result.matches[0].total_variation_distance == pytest.approx(0.2)
-    assert tv_result.matches[0].jensen_shannon_distance > 0
-    assert sum(match.probability for match in tv_result.matches) == pytest.approx(1.0)
+    assert result.matches[0].model == "model-a"
+    assert result.matches[0].total_variation_distance == pytest.approx(0.15)
+    assert len(result.matches[0].feature_matches) == 2
+    assert {item.prompt_id for item in result.matches[0].feature_matches} == {
+        "favorite_number", "model_identity"
+    }
+    assert sum(match.probability for match in result.matches) == pytest.approx(1.0)
 
-    assert js_result.distance_type == "jensen_shannon"
-    assert js_result.matches[0].model == "model-a"
-    assert js_result.matches[0].jensen_shannon_distance > 0
-    assert sum(match.probability for match in js_result.matches) == pytest.approx(1.0)
+
+def test_distribution_prediction_requires_matching_prompt_and_params_hash(tmp_path) -> None:
+    _save(tmp_path, "model-a", "favorite_number", "favorite prompt", ("142",) * 10)
+
+    with pytest.raises(ValueError, match="no saved fingerprints match"):
+        predict_distribution(
+            [{"prompt_id": "favorite_number", "params_hash": "wrong-hash", "values": ["142"]}],
+            tmp_path,
+        )
+
+
+def test_distribution_prediction_rejects_missing_experiment_identity(tmp_path) -> None:
+    with pytest.raises(ValueError, match="missing fields"):
+        predict_distribution([{"values": ["142"]}], tmp_path)
 
 
 def test_distribution_prediction_rejects_unknown_distance_type(tmp_path) -> None:
-    save_fingerprint(_fingerprint("model-a", ("142",) * 10), tmp_path, prompt_id="favorite_number")
+    fingerprint_hash = _save(tmp_path, "model-a", "favorite_number", "favorite prompt", ("142",) * 10)
 
     with pytest.raises(ValueError, match="unsupported distance_type"):
-        predict_distribution(["142"], tmp_path, distance_type="euclidean")  # type: ignore[arg-type]
+        predict_distribution(
+            [{"prompt_id": "favorite_number", "params_hash": fingerprint_hash, "values": ["142"]}],
+            tmp_path,
+            distance_type="euclidean",  # type: ignore[arg-type]
+        )

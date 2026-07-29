@@ -46,6 +46,42 @@ _DISTANCE_KEYS: dict[DistanceType, str] = {
 
 
 @dataclass(frozen=True, slots=True)
+class ObservedDistribution:
+    """One observed feature distribution with its exact experiment identity."""
+
+    prompt_id: str
+    params_hash: str
+    values: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "prompt_id": self.prompt_id,
+            "params_hash": self.params_hash,
+            "values": list(self.values),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedFeatureMatch:
+    """One reference feature selected for a model and an observed distribution."""
+
+    prompt_id: str
+    params_hash: str
+    total_variation_distance: float
+    jensen_shannon_distance: float
+    fingerprint_path: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "prompt_id": self.prompt_id,
+            "params_hash": self.params_hash,
+            "total_variation_distance": self.total_variation_distance,
+            "jensen_shannon_distance": self.jensen_shannon_distance,
+            "fingerprint_path": str(self.fingerprint_path),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ObservedDistributionMatch:
     """Closest saved fingerprint and both distances for one historical model."""
 
@@ -53,7 +89,7 @@ class ObservedDistributionMatch:
     total_variation_distance: float
     jensen_shannon_distance: float
     probability: float
-    fingerprint_path: Path
+    feature_matches: tuple[ObservedFeatureMatch, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,7 +97,7 @@ class ObservedDistributionMatch:
             "total_variation_distance": self.total_variation_distance,
             "jensen_shannon_distance": self.jensen_shannon_distance,
             "probability": self.probability,
-            "fingerprint_path": str(self.fingerprint_path),
+            "feature_matches": [match.to_dict() for match in self.feature_matches],
         }
 
 
@@ -70,6 +106,7 @@ class ObservedDistributionIdentification:
     """Offline prediction result for externally collected sample values."""
 
     values: tuple[str, ...]
+    observed_distributions: tuple[ObservedDistribution, ...]
     matches: tuple[ObservedDistributionMatch, ...]
     distance_type: DistanceType
     softmax_temperature: float
@@ -77,6 +114,7 @@ class ObservedDistributionIdentification:
     def to_dict(self) -> dict[str, Any]:
         return {
             "values": list(self.values),
+            "observed_distributions": [item.to_dict() for item in self.observed_distributions],
             "distance_type": self.distance_type,
             "softmax_temperature": self.softmax_temperature,
             "matches": [match.to_dict() for match in self.matches],
@@ -213,26 +251,31 @@ def identify_fingerprint(
 
 
 def predict_distribution(
-    values: list[str] | tuple[str, ...],
+    observed_distributions: (
+        list[ObservedDistribution | Mapping[str, Any]]
+        | tuple[ObservedDistribution | Mapping[str, Any], ...]
+    ),
     reference_directory: str | Path,
     *,
     distance_type: DistanceType = "total_variation",
     softmax_temperature: float = 0.1,
 ) -> ObservedDistributionIdentification:
-    """Rank saved fingerprints against externally collected values offline.
+    """Identify models by aggregating multiple experiment-matched features.
 
-    ``distance_type`` selects the metric used to choose each model's closest
-    reference, rank models, and calculate the softmax relative score. Every
-    returned match always includes both total-variation and Jensen-Shannon
-    distances. The score is a relative similarity, not a calibrated
-    model-identity probability.
+    Every observed item must contain ``prompt_id``, ``params_hash``, and
+    ``values``. A reference is eligible only when both identifiers match
+    exactly. Each model must cover every supplied feature; its final distance
+    is the equal-weight mean of its per-feature distances.
     """
     if distance_type not in _DISTANCE_KEYS:
         supported = ", ".join(sorted(_DISTANCE_KEYS))
         raise ValueError(f"unsupported distance_type {distance_type!r}; expected one of: {supported}")
-    observed = tuple(str(value) for value in values)
+    observed = tuple(_coerce_observed_distribution(item) for item in observed_distributions)
     if not observed:
-        raise ValueError("values must not be empty")
+        raise ValueError("observed_distributions must not be empty")
+    identities = [(item.prompt_id, item.params_hash) for item in observed]
+    if len(set(identities)) != len(identities):
+        raise ValueError("each observed distribution must have a unique prompt_id and params_hash")
     if softmax_temperature <= 0:
         raise ValueError("softmax_temperature must be greater than zero")
 
@@ -241,39 +284,96 @@ def predict_distribution(
     if not paths:
         raise ValueError(f"fingerprint directory contains no JSON fingerprints: {directory}")
 
-    distance_key = _DISTANCE_KEYS[distance_type]
-    closest_by_model: dict[str, tuple[dict[str, float], Path]] = {}
+    references: dict[tuple[str, str], dict[str, list[tuple[ModelFingerprint, Path]]]] = {}
     for path in paths:
+        payload = json.loads(path.read_text("utf-8"))
+        if not isinstance(payload, Mapping):
+            continue
+        prompt_id = payload.get("prompt_id")
+        params_hash = payload.get("parameters_hash")
+        if not isinstance(prompt_id, str) or not isinstance(params_hash, str):
+            continue
+        identity = (prompt_id, params_hash)
+        if identity not in identities:
+            continue
         reference = load_fingerprint(path)
-        distances = compare_distributions(reference.values, observed)
-        previous = closest_by_model.get(reference.model)
-        if previous is None or distances[distance_key] < previous[0][distance_key]:
-            closest_by_model[reference.model] = (distances, path)
+        references.setdefault(identity, {}).setdefault(reference.model, []).append((reference, path))
 
-    scored = sorted(
-        ((model, distances, path) for model, (distances, path) in closest_by_model.items()),
-        key=lambda item: item[1][distance_key],
-    )
-    logits = [-distances[distance_key] / softmax_temperature for _, distances, _ in scored]
+    missing = [identity for identity in identities if identity not in references]
+    if missing:
+        formatted = ", ".join(f"{prompt_id}/{params_hash}" for prompt_id, params_hash in missing)
+        raise ValueError(f"no saved fingerprints match observed distributions: {formatted}")
+
+    common_models = set.intersection(*(set(references[identity]) for identity in identities))
+    if not common_models:
+        raise ValueError("no model has saved fingerprints for every observed distribution")
+
+    distance_key = _DISTANCE_KEYS[distance_type]
+    scored: list[tuple[str, float, float, float, tuple[ObservedFeatureMatch, ...]]] = []
+    for model in sorted(common_models):
+        feature_matches: list[ObservedFeatureMatch] = []
+        for item in observed:
+            candidates = []
+            for reference, path in references[(item.prompt_id, item.params_hash)][model]:
+                distances = compare_distributions(reference.values, item.values)
+                candidates.append((distances, path))
+            distances, path = min(candidates, key=lambda candidate: candidate[0][distance_key])
+            feature_matches.append(
+                ObservedFeatureMatch(
+                    prompt_id=item.prompt_id,
+                    params_hash=item.params_hash,
+                    total_variation_distance=distances["total_variation_distance"],
+                    jensen_shannon_distance=distances["jensen_shannon_distance"],
+                    fingerprint_path=path,
+                )
+            )
+        tvd = sum(item.total_variation_distance for item in feature_matches) / len(feature_matches)
+        jsd = sum(item.jensen_shannon_distance for item in feature_matches) / len(feature_matches)
+        scored.append((model, tvd, jsd, tuple(feature_matches)))
+
+    scored.sort(key=lambda item: item[1] if distance_type == "total_variation" else item[2])
+    logits = [-(tvd if distance_type == "total_variation" else jsd) / softmax_temperature for _, tvd, jsd, _ in scored]
     maximum = max(logits)
     weights = [math.exp(logit - maximum) for logit in logits]
     normalizer = sum(weights)
     matches = tuple(
         ObservedDistributionMatch(
             model=model,
-            total_variation_distance=distances["total_variation_distance"],
-            jensen_shannon_distance=distances["jensen_shannon_distance"],
+            total_variation_distance=tvd,
+            jensen_shannon_distance=jsd,
             probability=weight / normalizer,
-            fingerprint_path=path,
+            feature_matches=feature_matches,
         )
-        for (model, distances, path), weight in zip(scored, weights, strict=True)
+        for (model, tvd, jsd, feature_matches), weight in zip(scored, weights, strict=True)
     )
     return ObservedDistributionIdentification(
-        values=observed,
+        values=tuple(value for item in observed for value in item.values),
+        observed_distributions=observed,
         matches=matches,
         distance_type=distance_type,
         softmax_temperature=softmax_temperature,
     )
+
+
+def _coerce_observed_distribution(
+    value: ObservedDistribution | Mapping[str, Any],
+) -> ObservedDistribution:
+    if isinstance(value, ObservedDistribution):
+        return value
+    required = {"prompt_id", "params_hash", "values"}
+    missing = required - value.keys()
+    if missing:
+        raise ValueError(f"observed distribution is missing fields: {', '.join(sorted(missing))}")
+    prompt_id = value["prompt_id"]
+    params_hash = value["params_hash"]
+    values = value["values"]
+    if not isinstance(prompt_id, str) or not prompt_id:
+        raise ValueError("observed distribution prompt_id must be a non-empty string")
+    if not isinstance(params_hash, str) or not params_hash:
+        raise ValueError("observed distribution params_hash must be a non-empty string")
+    if not isinstance(values, (list, tuple)) or not values:
+        raise ValueError("observed distribution values must be a non-empty list or tuple")
+    return ObservedDistribution(prompt_id, params_hash, tuple(str(item) for item in values))
 
 
 def _load_fingerprint_directory(directory: str | Path) -> tuple[ModelFingerprint, ...]:

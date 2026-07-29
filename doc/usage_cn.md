@@ -107,29 +107,33 @@ python examples/get_fingerprint.py
 
 ## 4. 根据已观测分布预测
 
-当你已拥有抽取好的输出值，希望离线匹配 `fingerprints/` 中所有历史指纹时，使用 `predict_distribution()`；该函数不会调用 LLM：
+当你已拥有**多个探针**抽取出的输出值，希望离线进行模型级别匹配时，使用 `predict_distribution()`；该函数不会调用 LLM。每个输入分布必须声明精确的 `prompt_id` 和 `params_hash`（即对应参考指纹 JSON 中的 `parameters_hash`）：
 
 ```python
 from vestigia import predict_distribution
 
-values = ["163", "142", "163", "168", "142", "150", "168", "142", "142", "198"]
 result = predict_distribution(
-    values,
+    [
+        {
+            "prompt_id": "favorite_number",
+            "params_hash": "复制已保存指纹的 parameters_hash",
+            "values": ["163", "142", "163", "168", "142"],
+        },
+        {
+            "prompt_id": "model_identity",
+            "params_hash": "复制已保存指纹的 parameters_hash",
+            "values": ["gpt", "gpt", "null", "gpt"],
+        },
+    ],
     "fingerprints",
     distance_type="jensen_shannon",  # 或 "total_variation"
     softmax_temperature=0.1,
 )
-
-for match in result.matches:
-    print(
-        match.model,
-        match.total_variation_distance,
-        match.jensen_shannon_distance,
-        match.probability,
-    )
 ```
 
-每个模型结果都会同时返回两种距离。`distance_type` 决定排序、同一模型多份历史指纹的选择方式，以及 softmax 相对分数的计算方式。`probability` 仅是**相对相似度分数**，不是模型身份的校准概率。
+函数只会比较 `prompt_id` 和 `params_hash` 均完全相同的参考特征。候选模型必须覆盖**每一项**输入特征；最终模型距离是各特征距离的等权平均值。`feature_matches` 会保留每一个探针的距离和来源指纹路径，便于解释判断结果。
+
+每个模型结果都会同时返回两种距离。`distance_type` 决定排序、每项特征存在多份历史指纹时的选择方式，以及 softmax 相对分数的计算方式。`probability` 仅是**相对相似度分数**，不是模型身份的校准概率。
 
 可直接编辑并运行文本表格示例：
 

@@ -107,29 +107,33 @@ python examples/get_fingerprint.py
 
 ## 4. Predict from externally observed values
 
-Use `predict_distribution()` when you already have extracted response values and want to compare them to every saved fingerprint without making LLM calls:
+Use `predict_distribution()` when you have extracted values from **multiple probes** and want an offline, model-level comparison against saved fingerprints. Each input distribution must declare the exact `prompt_id` and `params_hash` (`parameters_hash` in its saved reference JSON):
 
 ```python
 from vestigia import predict_distribution
 
-values = ["163", "142", "163", "168", "142", "150", "168", "142", "142", "198"]
 result = predict_distribution(
-    values,
+    [
+        {
+            "prompt_id": "favorite_number",
+            "params_hash": "copy-the-saved-parameters_hash",
+            "values": ["163", "142", "163", "168", "142"],
+        },
+        {
+            "prompt_id": "model_identity",
+            "params_hash": "copy-the-saved-parameters_hash",
+            "values": ["gpt", "gpt", "null", "gpt"],
+        },
+    ],
     "fingerprints",
     distance_type="jensen_shannon",  # or "total_variation"
     softmax_temperature=0.1,
 )
-
-for match in result.matches:
-    print(
-        match.model,
-        match.total_variation_distance,
-        match.jensen_shannon_distance,
-        match.probability,
-    )
 ```
 
-Both distances are returned for every model. `distance_type` controls ranking, selection of the closest historical fingerprint per model, and the softmax score. `probability` is a relative similarity score, **not** a calibrated probability that the model has a particular identity.
+The function only compares a feature with references having the same `prompt_id` and `params_hash`. A candidate model must have a matching saved fingerprint for **every** supplied feature. The final model distance is the equal-weight mean of its per-feature distances; `feature_matches` retains the per-probe distance and source fingerprint path.
+
+Both distances are returned for every model. `distance_type` controls ranking, selection of the closest duplicate reference for each feature, and the softmax score. `probability` is a relative similarity score, **not** a calibrated probability that the model has a particular identity.
 
 A ready-to-edit ASCII-table example is available at:
 
