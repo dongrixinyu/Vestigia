@@ -51,7 +51,7 @@ def check(_: str, parsed: Mapping[str, Any]) -> bool:
 
 
 PROMPT = PromptTemplate(
-    id="hiking_choice",
+    id="outdoor_trip_choice",
     category="preference",
     variants=(
         f"你计划安排半天户外放空行程。{OPTIONS}\n{OUTPUT_RULE}",

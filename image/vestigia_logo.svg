@@ -60,7 +60,7 @@
     <text x="0" y="-5" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="52" font-weight="700" fill="url(#mainGrad)" letter-spacing="1" filter="url(#shadow)">
       Vestigia
     </text>
-    <text x="2" y="28" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b" letter-spacing="3">
+    <text x="2" y="28" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#c4c4cb" letter-spacing="3">
       LLM FINGERPRINT DETECTOR
     </text>
     <line x1="2" y1="42" x2="180" y2="42" stroke="url(#mainGrad)" stroke-width="1.5" opacity="0.5"/>

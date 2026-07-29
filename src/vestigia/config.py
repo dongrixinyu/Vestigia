@@ -35,6 +35,11 @@ STABILITY_RESAMPLES = 1_000
 STABILITY_SEED = 0
 MAX_P95_TV_DISTANCE = 0.20
 
+# Maximum simultaneous requests made while collecting repeated samples. Requests
+# are submitted in fixed-size batches, so 48 samples with this set to 10 run as
+# 10 + 10 + 10 + 10 + 8. Set to 1 to force sequential collection.
+LLM_COLLECTION_CONCURRENCY = 10
+
 # Number of retries after the initial request when a network connection error
 # occurs. Change this value to tune retry behavior for all LLM requests.
 NETWORK_RETRY_MAX_RETRIES = 5

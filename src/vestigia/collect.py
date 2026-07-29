@@ -7,11 +7,12 @@ import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from vestigia.config import SYSTEM_PROMPT
+from vestigia.config import LLM_COLLECTION_CONCURRENCY, SYSTEM_PROMPT
 from vestigia.fingerprint import build_fingerprint
 from vestigia.llm import LLMClient, LLMConfig, LLMRequestError, LLMResponse, RequestSignature
 from vestigia.prompts import DEFAULT_PROMPTS, PromptTemplate, iter_prompts
@@ -147,6 +148,8 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("--api-key is required (or set LLM_API_KEY)")
     if args.count < 1:
         raise ValueError("--count must be greater than zero")
+    if LLM_COLLECTION_CONCURRENCY < 1:
+        raise ValueError("LLM_COLLECTION_CONCURRENCY must be greater than zero")
 
     if args.prompt_id:
         template = next(template for template in DEFAULT_PROMPTS if template.id == args.prompt_id)
@@ -197,47 +200,32 @@ def run(args: argparse.Namespace) -> int:
     failures = 0
     records: list[dict[str, Any]] = []
     with LLMClient(config) as client, args.output.open("w", encoding="utf-8") as output:
-        for index, (prompt, template) in enumerate(prompt_sequence, start=1):
-            signature_context = client.request_signature_context(prompt, system=args.system)
-            signature = RequestSignature(
-                model=str(signature_context.pop("request_model")),
-                provider=config.provider,
-                prompt=prompt,
-                prompt_id=template.id,
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                system=_effective_system_prompt(args.system),
-                extra_body=config.extra_body,
-                disable_response_cache=config.disable_response_cache,
-                cache_bust_query_param=config.cache_bust_query_param,
-                **signature_context,
+        for batch_start in range(0, args.count, LLM_COLLECTION_CONCURRENCY):
+            batch = list(
+                enumerate(
+                    _take_prompt_batch(
+                        prompt_sequence,
+                        min(LLM_COLLECTION_CONCURRENCY, args.count - batch_start),
+                    ),
+                    start=batch_start + 1,
+                )
             )
-            try:
-                response = client.complete(prompt, system=args.system)
-                record = response_record(index, prompt, template, response, signature)
-                print(f"[{index}/{args.count}] ok: {template.id}", file=sys.stderr)
-            except LLMRequestError as exc:
-                failures += 1
-                record = {
-                    "index": index,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "prompt_id": template.id,
-                    "category": template.category,
-                    "prompt": prompt,
-                    "status": "error",
-                    "error": {
-                        "message": str(exc),
-                        "status_code": exc.status_code,
-                        "response_body": exc.response_body,
-                    },
-                }
-                print(f"[{index}/{args.count}] error: {exc}", file=sys.stderr)
-                if args.fail_fast:
+            with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+                results = executor.map(
+                    lambda item: _collect_record(client, config, args, *item),
+                    batch,
+                )
+                for index, record, error in results:
+                    if error is None:
+                        print(f"[{index}/{args.count}] ok: {record['prompt_id']}", file=sys.stderr)
+                    else:
+                        failures += 1
+                        print(f"[{index}/{args.count}] error: {error}", file=sys.stderr)
                     output.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    return 1
-            output.write(json.dumps(record, ensure_ascii=False) + "\n")
-            output.flush()
-            records.append(record)
+                    output.flush()
+                    records.append(record)
+                    if error is not None and args.fail_fast:
+                        return 1
 
     if args.fingerprint_output:
         args.fingerprint_output.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +234,55 @@ def run(args: argparse.Namespace) -> int:
             json.dumps(fingerprint, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
     return 1 if failures else 0
+
+
+def _take_prompt_batch(
+    prompt_sequence: Iterator[tuple[str, PromptTemplate]], size: int
+) -> list[tuple[str, PromptTemplate]]:
+    """Consume exactly one sequential batch from a prompt iterator."""
+    return [next(prompt_sequence) for _ in range(size)]
+
+
+def _collect_record(
+    client: LLMClient,
+    config: LLMConfig,
+    args: argparse.Namespace,
+    index: int,
+    prompt_and_template: tuple[str, PromptTemplate],
+) -> tuple[int, dict[str, Any], LLMRequestError | None]:
+    """Make one request; the caller writes its ordered result in the main thread."""
+    prompt, template = prompt_and_template
+    signature_context = client.request_signature_context(prompt, system=args.system)
+    signature = RequestSignature(
+        model=str(signature_context.pop("request_model")),
+        provider=config.provider,
+        prompt=prompt,
+        prompt_id=template.id,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        system=_effective_system_prompt(args.system),
+        extra_body=config.extra_body,
+        disable_response_cache=config.disable_response_cache,
+        cache_bust_query_param=config.cache_bust_query_param,
+        **signature_context,
+    )
+    try:
+        response = client.complete(prompt, system=args.system)
+        return index, response_record(index, prompt, template, response, signature), None
+    except LLMRequestError as exc:
+        return index, {
+            "index": index,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "prompt_id": template.id,
+            "category": template.category,
+            "prompt": prompt,
+            "status": "error",
+            "error": {
+                "message": str(exc),
+                "status_code": exc.status_code,
+                "response_body": exc.response_body,
+            },
+        }, exc
 
 
 def _effective_system_prompt(system: str | None) -> str:

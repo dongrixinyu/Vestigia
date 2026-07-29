@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from vestigia.config import (
     MAX_P95_TV_DISTANCE,
+    LLM_COLLECTION_CONCURRENCY,
     STABILITY_RESAMPLES,
     STABILITY_SEED,
     STABILITY_SUBSET_SIZE,
     SYSTEM_PROMPT,
 )
 from vestigia.fingerprint import canonical_value, resolve_field
-from vestigia.llm import LLMClient, LLMResponse
+from vestigia.llm import LLMClient
 from vestigia.validation import (
     compare_distributions,
     distribution,
@@ -218,16 +220,33 @@ def _collect_feature_values(
 ) -> tuple[list[str], list[int] | None]:
     values: list[str] = []
     raw_lengths: list[int] | None = [] if feature_kind == "length" else None
-    for _ in range(count):
-        response: LLMResponse = client.complete(prompt)
-        if feature_kind == "parsed":
-            parsed = parser(response.content)
-            values.append(_distribution_value(resolve_field({"parsed": parsed}, field)))
-        else:
-            output = response.content if length_field == "content" else response.reasoning_content or ""
-            raw_lengths.append(len(output))  # type: ignore[union-attr]
-            values.append(log_length_values([len(output)])[0])
+    for batch_size in _batch_sizes(count, LLM_COLLECTION_CONCURRENCY):
+        # executor.map preserves input order, so the fingerprint values remain
+        # deterministic with respect to request sequence even though requests
+        # within one batch run concurrently.
+        with ThreadPoolExecutor(max_workers=batch_size) as executor:
+            responses = executor.map(lambda _: client.complete(prompt), range(batch_size))
+            for response in responses:
+                if feature_kind == "parsed":
+                    parsed = parser(response.content)
+                    values.append(_distribution_value(resolve_field({"parsed": parsed}, field)))
+                else:
+                    output = (
+                        response.content
+                        if length_field == "content"
+                        else response.reasoning_content or ""
+                    )
+                    raw_lengths.append(len(output))  # type: ignore[union-attr]
+                    values.append(log_length_values([len(output)])[0])
     return values, raw_lengths
+
+
+def _batch_sizes(count: int, concurrency: int) -> tuple[int, ...]:
+    """Split a request count into fixed-size, sequential concurrency batches."""
+    if concurrency < 1:
+        raise ValueError("LLM_COLLECTION_CONCURRENCY must be greater than zero")
+    full_batches, remainder = divmod(count, concurrency)
+    return (concurrency,) * full_batches + ((remainder,) if remainder else ())
 
 
 def _distribution_value(value: Any) -> str:
