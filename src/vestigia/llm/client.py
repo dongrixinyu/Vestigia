@@ -12,6 +12,8 @@ from loguru import logger
 from vestigia.config import NETWORK_RETRY_MAX_RETRIES, SYSTEM_PROMPT
 from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
 
+litellm.disable_remote_model_cost_map = True
+
 
 class LLMClient:
     """Call every supported model through :func:`litellm.completion`.
