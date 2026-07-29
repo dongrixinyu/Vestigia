@@ -76,4 +76,5 @@ PROMPT = PromptTemplate(
     variants=tuple(f"{description}{SCORING_INSTRUCTION}" for description in PROJECT_DESCRIPTIONS),
     parser=parse,
     checker=check,
+    field="parsed.score.value",
 )

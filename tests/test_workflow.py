@@ -7,6 +7,7 @@ import pytest
 from vestigia.config import SYSTEM_PROMPT
 from vestigia.identify import ModelFingerprint
 from vestigia.prompts.favorite_number import PROMPT as FAVORITE_NUMBER
+from vestigia.prompts.project_success_score import PROMPT as PROJECT_SUCCESS_SCORE
 from vestigia.workflow import _select_prompt, load_fingerprint, save_fingerprint
 
 
@@ -95,11 +96,17 @@ def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> 
 
 
 def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:
-    prompt, parser, feature_kind, length_field = _select_prompt(
+    prompt, parser, field, feature_kind, length_field = _select_prompt(
         prompt_id="favorite_number", variant_index=0
     )
 
     assert prompt == FAVORITE_NUMBER.variants[0]
     assert parser is FAVORITE_NUMBER.parser
+    assert field == "parsed.first_number.value"
     assert feature_kind == "parsed"
     assert length_field == "content"
+
+
+def test_builtin_prompts_own_their_fingerprint_fields() -> None:
+    assert FAVORITE_NUMBER.field == "parsed.first_number.value"
+    assert PROJECT_SUCCESS_SCORE.field == "parsed.score.value"

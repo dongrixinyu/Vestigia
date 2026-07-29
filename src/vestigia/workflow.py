@@ -101,16 +101,15 @@ def create_fingerprint(
     provider: str = "openai_compatible",
     endpoint: str | None = None,
     request_params: Mapping[str, Any] | None = None,
-    field: str | None = None,
     count: int = 50,
 ) -> ModelFingerprint:
     """Sample one built-in probe repeatedly and save its response distribution.
 
-    ``prompt_id`` selects a probe from :mod:`vestigia.prompts`; arbitrary prompt
-    text is deliberately not accepted. ``variant_index`` selects one fixed
-    wording from that probe, which is then used for every one of the ``count``
-    calls. The probe's parser is used automatically unless explicitly
-    overridden.
+    ``prompt_id`` selects a probe from :mod:`vestigia.prompts`; each built-in
+    probe owns its parser and the parsed field used as its fingerprint feature.
+    Arbitrary prompt text and caller-selected fields are deliberately not
+    accepted. ``variant_index`` selects one fixed wording from that probe,
+    which is then used for every one of the ``count`` calls.
 
     ``provider`` selects only the wire protocol used by the endpoint (for
     example, an OpenAI-compatible relay); it is not persisted in the
@@ -122,11 +121,11 @@ def create_fingerprint(
     JSON can be passed directly to :func:`verify_fingerprint` after loading
     with :func:`load_fingerprint`.
     """
-    selected_prompt, selected_parser, feature_kind, length_field = _select_prompt(
+    selected_prompt, selected_parser, selected_field, feature_kind, length_field = _select_prompt(
         prompt_id=prompt_id,
         variant_index=variant_index,
     )
-    selected_field = field or "parsed"
+    selected_field = selected_field if feature_kind == "parsed" else "parsed"
     params = _validated_request_params(request_params)
     config = LLMConfig(
         provider=provider,  # type: ignore[arg-type]
@@ -421,8 +420,8 @@ def _select_prompt(
     *,
     prompt_id: str,
     variant_index: int,
-) -> tuple[str, Parser, FeatureKind, str]:
-    """Resolve one fixed wording and parser from the built-in probe catalog."""
+) -> tuple[str, Parser, str, FeatureKind, str]:
+    """Resolve one fixed wording, parser, and feature field from a built-in probe."""
     if variant_index < 0:
         raise ValueError("variant_index must not be negative")
 
@@ -434,7 +433,7 @@ def _select_prompt(
             f"variant_index {variant_index} is out of range for prompt_id {prompt_id!r}; "
             f"choose 0 through {len(template.variants) - 1}"
         ) from error
-    return selected_prompt, template.parser, template.feature_kind, template.length_field
+    return selected_prompt, template.parser, template.field, template.feature_kind, template.length_field
 
 
 def _prompt_template(prompt_id: str) -> PromptTemplate:

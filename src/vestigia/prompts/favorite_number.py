@@ -113,4 +113,5 @@ PROMPT = PromptTemplate(
     ),
     parser=parse,
     checker=check,
+    field="parsed.first_number.value",
 )

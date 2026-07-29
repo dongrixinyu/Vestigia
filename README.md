@@ -273,7 +273,7 @@ result = identify_fingerprint(
 print(result.matches_reference)
 ```
 
-默认 `field="parsed"` 会统计内置 probe 的整个结构化解析结果；也可传入 `field`（例如数字题用 `"parsed.first_number.value"`）或显式 `parser` 覆盖。题目只能通过 `prompt_id` 从内置题库选择，不能传入任意 prompt 文本。`output` 是保存目录而不是自定义文件名：库会用 `{模型名}__{prompt_id}__{params_hash}.json` 写入文件。`params_hash` 是完整请求/特征参数（包括 temperature、max tokens、`extra_body`、system、prompt 原文及特征设置）的稳定 SHA-256 哈希，因此不同配置各自保存，不会混在同一个文件中。`provider` 仅用于选择实际接入端点的调用协议（`openai_compatible` 或 `anthropic`），不会写入持久化指纹、文件名或参数哈希；因此指纹不会留下中转站或调用格式的痕迹。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
+每个内置 `prompt_id` 都绑定自己的 parser 和特征字段，调用 `create_fingerprint` 时无需、也不能传入 `field`。例如 `favorite_number` 自动统计 `parsed.first_number.value`，`project_success_score` 自动统计 `parsed.score.value`；其他内置题目默认统计完整的 `parsed` 结果。题目只能通过 `prompt_id` 从内置题库选择，不能传入任意 prompt 文本。`output` 是保存目录而不是自定义文件名：库会用 `{模型名}__{prompt_id}__{params_hash}.json` 写入文件。`params_hash` 是完整请求/特征参数（包括 temperature、max tokens、`extra_body`、system、prompt 原文及特征设置）的稳定 SHA-256 哈希，因此不同配置各自保存，不会混在同一个文件中。`provider` 仅用于选择实际接入端点的调用协议（`openai_compatible` 或 `anthropic`），不会写入持久化指纹、文件名或参数哈希；因此指纹不会留下中转站或调用格式的痕迹。`verify_fingerprint` 默认继承参考指纹的 `extra_body`；若显式传入不同采样参数，会拒绝比较，避免混合不同请求条件。
 
 完整的“采样 → 保存 → 加载 → 比较”可直接运行 `examples/fingerprint_and_compare.py`。它只调用 `create_fingerprint`、`load_fingerprint` 和 `verify_fingerprint`；在文件顶部填写两端模型的 `LLM_*` / `CANDIDATE_LLM_*` 连接变量，内置选择 `favorite_number` 探针并输出完整比较报告。
 
