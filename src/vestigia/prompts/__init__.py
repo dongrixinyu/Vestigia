@@ -10,12 +10,14 @@ from vestigia.prompts.creative_association import PROMPT as CREATIVE_ASSOCIATION
 from vestigia.prompts.everyday_advice import PROMPT as EVERYDAY_ADVICE
 from vestigia.prompts.favorite_number import PROMPT as FAVORITE_NUMBER
 from vestigia.prompts.instruction_following import PROMPT as INSTRUCTION_FOLLOWING
+from vestigia.prompts.project_success_score import PROMPT as PROJECT_SUCCESS_SCORE
 from vestigia.prompts.short_self_description import PROMPT as SHORT_SELF_DESCRIPTION
 from vestigia.prompts.simple_explanation import PROMPT as SIMPLE_EXPLANATION
 from vestigia.prompts.word_association import PROMPT as WORD_ASSOCIATION
 
 DEFAULT_PROMPTS: tuple[PromptTemplate, ...] = (
     FAVORITE_NUMBER,
+    PROJECT_SUCCESS_SCORE,
     SHORT_SELF_DESCRIPTION,
     CREATIVE_ASSOCIATION,
     AMBIGUOUS_CHOICE,
