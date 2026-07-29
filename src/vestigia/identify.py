@@ -201,12 +201,6 @@ def _request_configuration(
         "top_k": getattr(client.config, "top_k", None),
         "presence_penalty": getattr(client.config, "presence_penalty", 0.0),
         "frequency_penalty": getattr(client.config, "frequency_penalty", 0.0),
-        "reasoning": (
-            dict(getattr(client.config, "reasoning", None))
-            if isinstance(getattr(client.config, "reasoning", None), Mapping)
-            else getattr(client.config, "reasoning", None)
-        ),
-        "reasoning_effort": getattr(client.config, "reasoning_effort", None),
         "extra_body": dict(getattr(client.config, "extra_body", {})),
         "extra_headers": dict(getattr(client.config, "extra_headers", {})),
     }

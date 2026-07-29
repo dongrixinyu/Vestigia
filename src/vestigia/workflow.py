@@ -32,8 +32,6 @@ _REQUEST_PARAM_NAMES = frozenset(
         "top_k",
         "presence_penalty",
         "frequency_penalty",
-        "reasoning",
-        "reasoning_effort",
         "extra_body",
         "extra_headers",
 }
@@ -117,7 +115,9 @@ def create_fingerprint(
 
     ``base_url``, ``api_key`` and ``model`` are the required connection values.
     Put all model request controls in ``request_params``, for example
-    ``{"temperature": 0.1, "max_tokens": 64, "top_p": 0.9}``. The saved
+    ``{"temperature": 0.1, "max_tokens": 64, "top_p": 0.9}`` for portable
+    controls, and put endpoint-specific controls such as ``reasoning_effort``
+    in ``extra_body``. The saved
     JSON can be passed directly to :func:`verify_fingerprint` after loading
     with :func:`load_fingerprint`.
     """
@@ -458,6 +458,15 @@ def _coerce_saved_batch_fingerprint(value: Mapping[str, Any]) -> ModelFingerprin
     system_prompt = raw_params.get("system_prompt", SYSTEM_PROMPT)
     if not isinstance(system_prompt, str):
         raise ValueError("fingerprint request_params.system_prompt must be a string")
+    # Fingerprints saved before provider-specific controls were moved to
+    # ``extra_body`` may contain these deprecated top-level fields. Preserve
+    # their behavior by migrating them while loading the historical JSON.
+    extra_body = dict(raw_params.get("extra_body") or {})
+    for name in ("top_k", "reasoning", "reasoning_effort"):
+        deprecated_value = raw_params.pop(name, None)
+        if deprecated_value is not None and name not in extra_body:
+            extra_body[name] = deprecated_value
+    raw_params["extra_body"] = extra_body
     params = _validated_request_params({
         key: item for key, item in raw_params.items() if key != "system_prompt"
     })

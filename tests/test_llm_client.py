@@ -26,7 +26,11 @@ def test_client_routes_openai_compatible_request_through_litellm(completion) -> 
         )
     )
 
-    response = client.complete("hello", system="be concise", max_tokens=32)
+    response = client.complete(
+        "hello",
+        system="be concise",
+        request_parameters={"max_tokens": 32},
+    )
 
     completion.assert_called_once_with(
         model="openai/configured-model",
@@ -61,7 +65,7 @@ def test_client_injects_standard_system_prompt_when_no_custom_system_is_given() 
         )
     )
 
-    assert client._request_options([{"role": "user", "content": "hello"}], None, None, None)[
+    assert client._request_options([{"role": "user", "content": "hello"}], None)[
         "messages"
     ][0] == {"role": "system", "content": SYSTEM_PROMPT}
 
@@ -121,11 +125,13 @@ def test_generation_controls_are_exposed_in_litellm_signature_context() -> None:
             temperature=0.7,
             max_tokens=1024,
             top_p=1.0,
-            top_k=40,
             presence_penalty=0.2,
             frequency_penalty=0.3,
-            reasoning={"effort": "high"},
-            reasoning_effort="high",
+            extra_body={
+                "top_k": 40,
+                "reasoning": {"effort": "high"},
+                "reasoning_effort": "high",
+            },
         )
     )
 
@@ -138,12 +144,56 @@ def test_generation_controls_are_exposed_in_litellm_signature_context() -> None:
         "temperature": 0.7,
         "max_tokens": 1024,
         "top_p": 1.0,
-        "top_k": 40,
         "presence_penalty": 0.2,
         "frequency_penalty": 0.3,
-        "reasoning": {"effort": "high"},
-        "reasoning_effort": "high",
+        "extra_body": {
+            "top_k": 40,
+            "reasoning": {"effort": "high"},
+            "reasoning_effort": "high",
+        },
     }
+
+
+def test_top_k_defaults_to_omitted_and_is_nested_when_configured() -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example/v1",
+            api_key="secret",
+            model="configured-model",
+        )
+    )
+
+    default_request = client._request_options([{"role": "user", "content": "hello"}], None)
+    configured_request = client._request_options(
+        [{"role": "user", "content": "hello"}], None, {"top_k": 0}
+    )
+
+    assert "extra_body" not in default_request
+    assert configured_request["extra_body"] == {"top_k": 0}
+    assert "top_k" not in configured_request
+
+
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example/v1",
+            api_key="secret",
+            model="configured-model",
+            extra_body={"reasoning": True, "reasoning_effort": "low", "top_k": 20},
+        )
+    )
+
+    request = client._request_options([{"role": "user", "content": "hello"}], None)
+
+    assert request["extra_body"] == {
+        "reasoning": True,
+        "reasoning_effort": "low",
+        "top_k": 20,
+    }
+    assert "reasoning" not in request
+    assert "reasoning_effort" not in request
+    assert "top_k" not in request
 
 
 def test_config_rejects_multi_completion_and_stream_overrides() -> None:

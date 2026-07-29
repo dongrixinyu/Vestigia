@@ -6,24 +6,18 @@ from typing import Any
 # and recorded in every fingerprint. ``None`` means the parameter is omitted
 # because it has no portable value across providers.
 #
-# ``reasoning`` supports three forms because provider adapters expose different
-# APIs: ``None`` leaves reasoning mode untouched; ``bool`` explicitly enables
-# or disables it; a mapping passes provider-specific reasoning options (for
-# example a budget or effort object). Keep it ``None`` by default: forcing
-# reasoning on changes behavior/cost and is unsupported by many endpoints.
-# ``reasoning_effort`` is also omitted by default. Although ``high`` is a
-# common semantic default for reasoning-capable APIs, OpenAI-compatible
-# gateways such as DeepSeek may reject the field outright. Set it explicitly
-# only for an endpoint confirmed to support it.
+# Provider- or gateway-specific controls (for example ``reasoning``,
+# ``reasoning_effort``, ``seed`` or ``cache``) belong in ``extra_body``.
+# ``top_k`` is configured uniformly here, but is nested into ``extra_body``
+# at dispatch because LiteLLM routes it differently across providers.
 DEFAULT_REQUEST_PARAMS: dict[str, Any] = {
     "temperature": 1.0,
     "max_tokens": None,
     "top_p": 1.0,
+    # None means omit top_k; explicit 0 has provider-specific semantics.
     "top_k": None,
     "presence_penalty": 0.0,
     "frequency_penalty": 0.0,
-    "reasoning": None,
-    "reasoning_effort": None,
     "extra_body": {},
     "extra_headers": {},
 }

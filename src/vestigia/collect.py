@@ -76,9 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frequency-penalty", type=float, help="Frequency penalty")
     parser.add_argument(
         "--reasoning-json",
-        help='Reasoning configuration object, e.g. \'{"effort":"high"}\'',
+        help='Endpoint-specific reasoning body value, e.g. \'{"effort":"high"}\'; sent as extra_body.reasoning',
     )
-    parser.add_argument("--reasoning-effort", help="Reasoning effort, e.g. low, medium, high")
+    parser.add_argument(
+        "--reasoning-effort",
+        help="Endpoint-specific reasoning effort; sent as extra_body.reasoning_effort",
+    )
     parser.add_argument("--max-tokens", type=int, help="Maximum generated tokens")
     parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds")
     parser.add_argument("--system", help="Optional system instruction sent with every request")
@@ -166,6 +169,11 @@ def run(args: argparse.Namespace) -> int:
     reasoning = (
         json_object(args.reasoning_json, "--reasoning-json") if args.reasoning_json else None
     )
+    extra_body = dict(json_object(args.extra_body_json, "--extra-body-json"))
+    if reasoning is not None:
+        extra_body["reasoning"] = reasoning
+    if args.reasoning_effort is not None:
+        extra_body["reasoning_effort"] = args.reasoning_effort
     config = LLMConfig(
         provider=args.provider,
         base_url=args.base_url,
@@ -179,8 +187,6 @@ def run(args: argparse.Namespace) -> int:
         top_k=args.top_k,
         presence_penalty=args.presence_penalty,
         frequency_penalty=args.frequency_penalty,
-        reasoning=reasoning,
-        reasoning_effort=args.reasoning_effort,
         extra_headers=headers,
         extra_body=extra_body,
         disable_response_cache=not args.allow_response_cache,

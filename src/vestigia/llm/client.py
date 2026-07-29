@@ -12,6 +12,17 @@ from loguru import logger
 from vestigia.config import NETWORK_RETRY_MAX_RETRIES, SYSTEM_PROMPT
 from vestigia.llm.types import LLMConfig, LLMRequestError, LLMResponse, Message, Messages
 
+_GENERATION_PARAMETER_NAMES = frozenset(
+    {
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "top_k",
+        "presence_penalty",
+        "frequency_penalty",
+    }
+)
+
 litellm.disable_remote_model_cost_map = True
 
 
@@ -49,12 +60,15 @@ class LLMClient:
         prompt: str,
         *,
         system: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        request_parameters: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Return effective LiteLLM request controls without exposing secrets."""
+        """Return effective LiteLLM request controls without exposing secrets.
+
+        Per-call generation overrides belong in ``request_parameters``; for
+        example, ``{"temperature": 0.2, "max_tokens": 32}``.
+        """
         request = self._request_options(
-            [{"role": "user", "content": prompt}], system, temperature, max_tokens
+            [{"role": "user", "content": prompt}], system, request_parameters
         )
         return {
             "request_model": str(request["model"]),
@@ -86,16 +100,14 @@ class LLMClient:
         prompt: str,
         *,
         system: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        request_parameters: Mapping[str, Any] | None = None,
     ) -> LLMResponse:
         if not prompt:
             raise ValueError("prompt must not be empty")
         return self.complete_messages(
             [{"role": "user", "content": prompt}],
             system=system,
-            temperature=temperature,
-            max_tokens=max_tokens,
+            request_parameters=request_parameters,
         )
 
     def complete_messages(
@@ -103,12 +115,17 @@ class LLMClient:
         messages: Messages,
         *,
         system: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        request_parameters: Mapping[str, Any] | None = None,
     ) -> LLMResponse:
+        """Complete messages using optional per-call generation overrides.
+
+        Put every override in ``request_parameters``, such as
+        ``{"temperature": 0.2, "max_tokens": 32}``; individual generation
+        keyword arguments are intentionally not supported.
+        """
         if not messages:
             raise ValueError("messages must not be empty")
-        request = self._request_options(messages, system, temperature, max_tokens)
+        request = self._request_options(messages, system, request_parameters)
         try:
             response = self._completion_with_network_retries(request)
         except Exception as exc:
@@ -151,8 +168,7 @@ class LLMClient:
         self,
         messages: Messages,
         system: str | None,
-        temperature: float | None,
-        max_tokens: int | None,
+        request_parameters: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_messages = [dict(message) for message in messages]
         system_prompt = self.effective_system_prompt(system)
@@ -170,10 +186,13 @@ class LLMClient:
             options["api_version"] = self.config.api_version
         if self.config.extra_headers:
             options["extra_headers"] = dict(self.config.extra_headers)
-        self._add_generation_options(options, temperature, max_tokens)
-        # Config validation disallows n and stream, so output cardinality and
-        # transport mode cannot be changed through passthrough fields.
-        options.update(self.config.extra_body)
+        self._add_generation_options(options, request_parameters)
+        extra_body = dict(self.config.extra_body)
+        top_k = self._effective_top_k(request_parameters)
+        if top_k is not None:
+            extra_body["top_k"] = top_k
+        if extra_body:
+            options["extra_body"] = extra_body
         return options
 
     def _litellm_model(self) -> str:
@@ -182,23 +201,24 @@ class LLMClient:
             return self.config.model
         return f"{prefix}/{self.config.model}"
 
+    def _effective_top_k(self, request_parameters: Mapping[str, Any] | None) -> int | None:
+        """Resolve top_k; LiteLLM receives it inside provider-specific extra_body."""
+        overrides = _validated_generation_parameters(request_parameters)
+        top_k = overrides.get("top_k", self.config.top_k)
+        return int(top_k) if top_k is not None else None
+
     def _add_generation_options(
-        self, options: dict[str, Any], temperature: float | None, max_tokens: int | None
+        self, options: dict[str, Any], request_parameters: Mapping[str, Any] | None
     ) -> None:
+        overrides = _validated_generation_parameters(request_parameters)
         values = {
-            "temperature": temperature if temperature is not None else self.config.temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self.config.max_tokens,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
             "top_p": self.config.top_p,
-            "top_k": self.config.top_k,
             "presence_penalty": self.config.presence_penalty,
             "frequency_penalty": self.config.frequency_penalty,
-            "reasoning": (
-                dict(self.config.reasoning)
-                if isinstance(self.config.reasoning, Mapping)
-                else self.config.reasoning
-            ),
-            "reasoning_effort": self.config.reasoning_effort,
         }
+        values.update({name: value for name, value in overrides.items() if name != "top_k"})
         options.update({name: value for name, value in values.items() if value is not None})
 
     def _normalize(self, response: Any) -> LLMResponse:
@@ -225,6 +245,22 @@ class LLMClient:
             reasoning_content=reasoning_content,
         )
 
+
+
+def _validated_generation_parameters(
+    request_parameters: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate per-call generation overrides accepted by :class:`LLMClient`."""
+    if request_parameters is None:
+        return {}
+    unsupported = request_parameters.keys() - _GENERATION_PARAMETER_NAMES
+    if unsupported:
+        names = ", ".join(sorted(unsupported))
+        raise ValueError(f"unsupported request_parameters keys: {names}")
+    return {
+        name: dict(value) if name == "reasoning" and isinstance(value, Mapping) else value
+        for name, value in request_parameters.items()
+    }
 
 def _is_network_connection_error(exc: BaseException) -> bool:
     """Recognize connection and timeout errors emitted by LiteLLM transports.
