@@ -133,7 +133,7 @@ result = predict_distribution(
 
 The function compares references with the same `prompt_id`; a non-empty `params_hash` must match exactly, while an empty string matches any `parameters_hash`. A candidate model must have a matching saved fingerprint for **every** supplied feature. The final model distance is the equal-weight mean of its per-feature distances; `feature_matches` retains the actually selected parameter hash, per-probe distance, and source fingerprint path.
 
-Both distances are returned for every model. `distance_type` controls ranking, selection of the closest duplicate reference for each feature, and the softmax score. `probability` is a relative similarity score, **not** a calibrated probability that the model has a particular identity.
+Every model result returns the selected metric through generic `distance_type` and `distance` fields. `distance_type` controls ranking, selection of the closest duplicate reference for each feature, and the softmax score. `probability` is a relative similarity score, **not** a calibrated probability that the model has a particular identity.
 
 A ready-to-edit ASCII-table example is available at:
 

@@ -9,7 +9,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from vestigia.config import DEFAULT_REQUEST_PARAMS, SYSTEM_PROMPT
 from vestigia.identify import (
@@ -38,11 +38,20 @@ _REQUEST_PARAM_NAMES = frozenset(
 )
 
 
-DistanceType = Literal["total_variation", "jensen_shannon"]
-_DISTANCE_KEYS: dict[DistanceType, str] = {
+DistanceType = str
+_DISTANCE_RESULT_KEYS: dict[DistanceType, str] = {
     "total_variation": "total_variation_distance",
     "jensen_shannon": "jensen_shannon_distance",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedDistributionScore:
+    """Internal aggregate score for the selected distance type."""
+
+    model: str
+    distance: float
+    feature_matches: tuple[ObservedFeatureMatch, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,35 +80,35 @@ class ObservedFeatureMatch:
 
     prompt_id: str
     params_hash: str
-    total_variation_distance: float
-    jensen_shannon_distance: float
+    distance_type: DistanceType
+    distance: float
     fingerprint_path: Path
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "prompt_id": self.prompt_id,
             "params_hash": self.params_hash,
-            "total_variation_distance": self.total_variation_distance,
-            "jensen_shannon_distance": self.jensen_shannon_distance,
+            "distance_type": self.distance_type,
+            "distance": self.distance,
             "fingerprint_path": str(self.fingerprint_path),
         }
 
 
 @dataclass(frozen=True, slots=True)
 class ObservedDistributionMatch:
-    """Closest saved fingerprint and both distances for one historical model."""
+    """Closest saved fingerprints and aggregate distance for one historical model."""
 
     model: str
-    total_variation_distance: float
-    jensen_shannon_distance: float
+    distance_type: DistanceType
+    distance: float
     probability: float
     feature_matches: tuple[ObservedFeatureMatch, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
-            "total_variation_distance": self.total_variation_distance,
-            "jensen_shannon_distance": self.jensen_shannon_distance,
+            "distance_type": self.distance_type,
+            "distance": self.distance,
             "probability": self.probability,
             "feature_matches": [match.to_dict() for match in self.feature_matches],
         }
@@ -272,9 +281,10 @@ def predict_distribution(
     must cover every supplied feature; its final distance is the equal-weight
     mean of its per-feature distances.
     """
-    if distance_type not in _DISTANCE_KEYS:
-        supported = ", ".join(sorted(_DISTANCE_KEYS))
+    if distance_type not in _DISTANCE_RESULT_KEYS:
+        supported = ", ".join(sorted(_DISTANCE_RESULT_KEYS))
         raise ValueError(f"unsupported distance_type {distance_type!r}; expected one of: {supported}")
+    distance_result_key = _DISTANCE_RESULT_KEYS[distance_type]
     observed = tuple(_coerce_observed_distribution(item) for item in observed_distributions)
     if not observed:
         raise ValueError("observed_distributions must not be empty")
@@ -320,45 +330,50 @@ def predict_distribution(
     if not common_models:
         raise ValueError("no model has saved fingerprints for every observed distribution")
 
-    distance_key = _DISTANCE_KEYS[distance_type]
-    scored: list[tuple[str, float, float, float, tuple[ObservedFeatureMatch, ...]]] = []
+    scored: list[_ObservedDistributionScore] = []
     for model in sorted(common_models):
         feature_matches: list[ObservedFeatureMatch] = []
+        selected_distances: list[float] = []
         for item in observed:
             candidates = []
             for reference, path, reference_params_hash in references[(item.prompt_id, item.params_hash)][model]:
                 distances = compare_distributions(reference.values, item.values)
                 candidates.append((distances, path, reference_params_hash))
             distances, path, reference_params_hash = min(
-                candidates, key=lambda candidate: candidate[0][distance_key]
+                candidates, key=lambda candidate: candidate[0][distance_result_key]
             )
+            selected_distances.append(distances[distance_result_key])
             feature_matches.append(
                 ObservedFeatureMatch(
                     prompt_id=item.prompt_id,
                     params_hash=reference_params_hash,
-                    total_variation_distance=distances["total_variation_distance"],
-                    jensen_shannon_distance=distances["jensen_shannon_distance"],
+                    distance_type=distance_type,
+                    distance=distances[distance_result_key],
                     fingerprint_path=path,
                 )
             )
-        tvd = sum(item.total_variation_distance for item in feature_matches) / len(feature_matches)
-        jsd = sum(item.jensen_shannon_distance for item in feature_matches) / len(feature_matches)
-        scored.append((model, tvd, jsd, tuple(feature_matches)))
+        scored.append(
+            _ObservedDistributionScore(
+                model=model,
+                distance=sum(selected_distances) / len(selected_distances),
+                feature_matches=tuple(feature_matches),
+            )
+        )
 
-    scored.sort(key=lambda item: item[1] if distance_type == "total_variation" else item[2])
-    logits = [-(tvd if distance_type == "total_variation" else jsd) / softmax_temperature for _, tvd, jsd, _ in scored]
+    scored.sort(key=lambda item: item.distance)
+    logits = [-(item.distance / softmax_temperature) for item in scored]
     maximum = max(logits)
     weights = [math.exp(logit - maximum) for logit in logits]
     normalizer = sum(weights)
     matches = tuple(
         ObservedDistributionMatch(
-            model=model,
-            total_variation_distance=tvd,
-            jensen_shannon_distance=jsd,
+            model=item.model,
+            distance_type=distance_type,
+            distance=item.distance,
             probability=weight / normalizer,
-            feature_matches=feature_matches,
+            feature_matches=item.feature_matches,
         )
-        for (model, tvd, jsd, feature_matches), weight in zip(scored, weights, strict=True)
+        for item, weight in zip(scored, weights, strict=True)
     )
     return ObservedDistributionIdentification(
         values=tuple(value for item in observed for value in item.values),

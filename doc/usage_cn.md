@@ -133,7 +133,7 @@ result = predict_distribution(
 
 函数会比较 `prompt_id` 相同的参考特征；非空 `params_hash` 必须完全相同，空字符串则可匹配任意 `parameters_hash`。候选模型必须覆盖**每一项**输入特征；最终模型距离是各特征距离的等权平均值。`feature_matches` 会保留每一个探针实际选中的参数哈希、距离和来源指纹路径，便于解释判断结果。
 
-每个模型结果都会同时返回两种距离。`distance_type` 决定排序、每项特征存在多份历史指纹时的选择方式，以及 softmax 相对分数的计算方式。`probability` 仅是**相对相似度分数**，不是模型身份的校准概率。
+每个模型结果都会返回所选度量的通用 `distance_type` 和 `distance`。`distance_type` 决定排序、每项特征存在多份历史指纹时的选择方式，以及 softmax 相对分数的计算方式。`probability` 仅是**相对相似度分数**，不是模型身份的校准概率。
 
 可直接编辑并运行文本表格示例：
 
