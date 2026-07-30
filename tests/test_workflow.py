@@ -8,7 +8,12 @@ from vestigia.config import SYSTEM_PROMPT
 from vestigia.identify import ModelFingerprint
 from vestigia.prompts.favorite_number import PROMPT as FAVORITE_NUMBER
 from vestigia.prompts.project_success_score import PROMPT as PROJECT_SUCCESS_SCORE
-from vestigia.workflow import _select_prompt, load_fingerprint, save_fingerprint
+from vestigia.workflow import (
+    _fingerprint_parameters_hash,
+    _select_prompt,
+    load_fingerprint,
+    save_fingerprint,
+)
 
 
 def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path) -> None:
@@ -82,6 +87,41 @@ def test_save_fingerprint_uses_parameters_to_separate_files(tmp_path) -> None:
     warm_path = save_fingerprint(warm, tmp_path, prompt_id="favorite_number")
 
     assert cold_path != warm_path
+
+
+def test_parameters_hash_depends_on_request_params_and_system_prompt_only() -> None:
+    request_params = {"system_prompt": "system-a", "temperature": 0.1, "extra_body": {}}
+    common = dict(
+        model="reference-model",
+        request_configuration=request_params,
+        feature_kind="parsed",
+        field="parsed.value",
+        values=("yes",),
+        distribution={"yes": 1.0},
+        stability={"reliable": True},
+    )
+    first = ModelFingerprint(prompt="first prompt", **common)
+    different_feature = ModelFingerprint(
+        prompt="second prompt", feature_kind="length", field=None, **{
+            key: value
+            for key, value in common.items()
+            if key not in {"feature_kind", "field"}
+        }
+    )
+    different_request_params = ModelFingerprint(
+        prompt="first prompt", request_configuration={**request_params, "temperature": 0.7}, **{
+            key: value for key, value in common.items() if key != "request_configuration"
+        }
+    )
+    different_system_prompt = ModelFingerprint(
+        prompt="first prompt", request_configuration={**request_params, "system_prompt": "system-b"}, **{
+            key: value for key, value in common.items() if key != "request_configuration"
+        }
+    )
+
+    assert _fingerprint_parameters_hash(first) == _fingerprint_parameters_hash(different_feature)
+    assert _fingerprint_parameters_hash(first) != _fingerprint_parameters_hash(different_request_params)
+    assert _fingerprint_parameters_hash(first) != _fingerprint_parameters_hash(different_system_prompt)
 
 
 def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> None:

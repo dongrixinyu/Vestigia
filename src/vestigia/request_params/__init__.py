@@ -18,7 +18,7 @@ RequestParams = Mapping[str, Any]
 # not support them should use a separately versioned compatible preset.
 _STANDARD_V1: Final[Mapping[str, Any]] = MappingProxyType(
     {
-        "temperature": 0.1,
+        "temperature": 1,
         "max_tokens": None,
         "top_p": 1.0,
         "top_k": None,
@@ -45,13 +45,13 @@ _LOW_VARIANCE_V1: Final[Mapping[str, Any]] = MappingProxyType(
 
 REQUEST_PARAM_PRESETS: Final[Mapping[str, RequestParams]] = MappingProxyType(
     {
-        "fingerprint_standard_v1": _STANDARD_V1,
-        "fingerprint_low_variance_v1": _LOW_VARIANCE_V1,
+        "standard_v1": _STANDARD_V1,
+        "low_variance_v1": _LOW_VARIANCE_V1,
     }
 )
 """Immutable catalog of named, versioned request-parameter presets."""
 
-DEFAULT_REQUEST_PARAM_PRESET: Final[str] = "fingerprint_standard_v1"
+DEFAULT_REQUEST_PARAM_PRESET: Final[str] = "standard_v1"
 """Default portable fingerprint experiment profile."""
 
 

@@ -491,12 +491,19 @@ def _effective_request_params(fingerprint: ModelFingerprint) -> dict[str, Any]:
 
 
 def _fingerprint_parameters_hash(fingerprint: ModelFingerprint) -> str:
-    """Hash all request and feature controls apart from filename identity fields."""
+    """Hash the exact request parameters and system prompt for one experiment.
+
+    Prompt and feature definitions are deliberately excluded: they are
+    identified by ``prompt_id`` and must not cause identical request settings
+    to receive different parameter hashes.
+    """
+    configuration = _effective_request_params(fingerprint)
+    system_prompt = configuration.pop("system_prompt", SYSTEM_PROMPT)
+    if not isinstance(system_prompt, str):
+        raise ValueError("fingerprint request_configuration.system_prompt must be a string")
     parameters = {
-        "prompt": fingerprint.prompt,
-        "request_params": _effective_request_params(fingerprint),
-        "feature_kind": fingerprint.feature_kind,
-        "field": fingerprint.field,
+        "request_params": configuration,
+        "system_prompt": system_prompt,
     }
     canonical = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
