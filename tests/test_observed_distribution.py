@@ -54,12 +54,43 @@ def test_distribution_prediction_aggregates_matching_features_per_model(tmp_path
     )
 
     assert result.matches[0].model == "model-a"
-    assert result.matches[0].total_variation_distance == pytest.approx(0.15)
+    assert result.matches[0].distance == pytest.approx(0.15)
     assert len(result.matches[0].feature_matches) == 2
     assert {item.prompt_id for item in result.matches[0].feature_matches} == {
         "favorite_number", "model_identity"
     }
     assert sum(match.probability for match in result.matches) == pytest.approx(1.0)
+
+
+def test_distribution_prediction_recursively_loads_vendor_model_fingerprints(tmp_path) -> None:
+    fingerprint_directory = tmp_path / "vendor-a" / "model-a"
+    fingerprint_hash = _save(
+        fingerprint_directory, "model-a", "favorite_number", "favorite prompt", ("142",) * 10
+    )
+
+    result = predict_distribution(
+        [{"prompt_id": "favorite_number", "params_hash": fingerprint_hash, "values": ["142"]}],
+        tmp_path,
+    )
+
+    assert result.matches[0].model == "model-a"
+    assert result.matches[0].feature_matches[0].fingerprint_path.parent == fingerprint_directory
+
+
+def test_distribution_prediction_uses_any_params_hash_when_empty(tmp_path) -> None:
+    _save(tmp_path, "model-a", "favorite_number", "cold prompt", ("142",) * 10)
+    warm_hash = _save(tmp_path, "model-a", "favorite_number", "warm prompt", ("198",) * 10)
+
+    result = predict_distribution(
+        [{"prompt_id": "favorite_number", "params_hash": "", "values": ["198"]}],
+        tmp_path,
+    )
+
+    feature_match = result.matches[0].feature_matches[0]
+    assert result.matches[0].model == "model-a"
+    assert feature_match.params_hash == warm_hash
+    assert feature_match.distance == 0.0
+    assert feature_match.distance_type == "total_variation"
 
 
 def test_distribution_prediction_requires_matching_prompt_and_params_hash(tmp_path) -> None:
