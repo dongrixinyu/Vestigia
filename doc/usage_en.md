@@ -107,7 +107,7 @@ python examples/get_fingerprint.py
 
 ## 4. Predict from externally observed values
 
-Use `predict_distribution()` when you have extracted values from **multiple probes** and want an offline, model-level comparison against saved fingerprints. Each input distribution must declare the exact `prompt_id` and `params_hash` (`parameters_hash` in its saved reference JSON):
+Use `predict_distribution()` when you have extracted values from **multiple probes** and want an offline, model-level comparison against saved fingerprints. Each input distribution must declare `prompt_id` and `params_hash` (`parameters_hash` in its saved reference JSON). An empty `params_hash` string matches fingerprints with any parameter configuration for that `prompt_id`:
 
 ```python
 from vestigia import predict_distribution
@@ -131,7 +131,7 @@ result = predict_distribution(
 )
 ```
 
-The function only compares a feature with references having the same `prompt_id` and `params_hash`. A candidate model must have a matching saved fingerprint for **every** supplied feature. The final model distance is the equal-weight mean of its per-feature distances; `feature_matches` retains the per-probe distance and source fingerprint path.
+The function compares references with the same `prompt_id`; a non-empty `params_hash` must match exactly, while an empty string matches any `parameters_hash`. A candidate model must have a matching saved fingerprint for **every** supplied feature. The final model distance is the equal-weight mean of its per-feature distances; `feature_matches` retains the actually selected parameter hash, per-probe distance, and source fingerprint path.
 
 Both distances are returned for every model. `distance_type` controls ranking, selection of the closest duplicate reference for each feature, and the softmax score. `probability` is a relative similarity score, **not** a calibrated probability that the model has a particular identity.
 

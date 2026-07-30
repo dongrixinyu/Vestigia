@@ -47,7 +47,11 @@ _DISTANCE_KEYS: dict[DistanceType, str] = {
 
 @dataclass(frozen=True, slots=True)
 class ObservedDistribution:
-    """One observed feature distribution with its exact experiment identity."""
+    """One observed feature distribution and its experiment identity.
+
+    An empty ``params_hash`` is a wildcard that accepts every saved parameter
+    configuration for the same ``prompt_id``.
+    """
 
     prompt_id: str
     params_hash: str
@@ -263,9 +267,10 @@ def predict_distribution(
     """Identify models by aggregating multiple experiment-matched features.
 
     Every observed item must contain ``prompt_id``, ``params_hash``, and
-    ``values``. A reference is eligible only when both identifiers match
-    exactly. Each model must cover every supplied feature; its final distance
-    is the equal-weight mean of its per-feature distances.
+    ``values``. A non-empty ``params_hash`` must match exactly; an empty one
+    matches every saved parameter configuration for that prompt. Each model
+    must cover every supplied feature; its final distance is the equal-weight
+    mean of its per-feature distances.
     """
     if distance_type not in _DISTANCE_KEYS:
         supported = ", ".join(sorted(_DISTANCE_KEYS))
@@ -280,11 +285,11 @@ def predict_distribution(
         raise ValueError("softmax_temperature must be greater than zero")
 
     directory = Path(reference_directory)
-    paths = tuple(sorted(directory.glob("*.json"))) if directory.is_dir() else ()
+    paths = tuple(sorted(directory.rglob("*.json"))) if directory.is_dir() else ()
     if not paths:
         raise ValueError(f"fingerprint directory contains no JSON fingerprints: {directory}")
 
-    references: dict[tuple[str, str], dict[str, list[tuple[ModelFingerprint, Path]]]] = {}
+    references: dict[tuple[str, str], dict[str, list[tuple[ModelFingerprint, Path, str]]]] = {}
     for path in paths:
         payload = json.loads(path.read_text("utf-8"))
         if not isinstance(payload, Mapping):
@@ -293,11 +298,18 @@ def predict_distribution(
         params_hash = payload.get("parameters_hash")
         if not isinstance(prompt_id, str) or not isinstance(params_hash, str):
             continue
-        identity = (prompt_id, params_hash)
-        if identity not in identities:
+        matching_identities = [
+            identity
+            for identity in identities
+            if identity[0] == prompt_id and (not identity[1] or identity[1] == params_hash)
+        ]
+        if not matching_identities:
             continue
         reference = load_fingerprint(path)
-        references.setdefault(identity, {}).setdefault(reference.model, []).append((reference, path))
+        for identity in matching_identities:
+            references.setdefault(identity, {}).setdefault(reference.model, []).append(
+                (reference, path, params_hash)
+            )
 
     missing = [identity for identity in identities if identity not in references]
     if missing:
@@ -314,14 +326,16 @@ def predict_distribution(
         feature_matches: list[ObservedFeatureMatch] = []
         for item in observed:
             candidates = []
-            for reference, path in references[(item.prompt_id, item.params_hash)][model]:
+            for reference, path, reference_params_hash in references[(item.prompt_id, item.params_hash)][model]:
                 distances = compare_distributions(reference.values, item.values)
-                candidates.append((distances, path))
-            distances, path = min(candidates, key=lambda candidate: candidate[0][distance_key])
+                candidates.append((distances, path, reference_params_hash))
+            distances, path, reference_params_hash = min(
+                candidates, key=lambda candidate: candidate[0][distance_key]
+            )
             feature_matches.append(
                 ObservedFeatureMatch(
                     prompt_id=item.prompt_id,
-                    params_hash=item.params_hash,
+                    params_hash=reference_params_hash,
                     total_variation_distance=distances["total_variation_distance"],
                     jensen_shannon_distance=distances["jensen_shannon_distance"],
                     fingerprint_path=path,
@@ -369,8 +383,8 @@ def _coerce_observed_distribution(
     values = value["values"]
     if not isinstance(prompt_id, str) or not prompt_id:
         raise ValueError("observed distribution prompt_id must be a non-empty string")
-    if not isinstance(params_hash, str) or not params_hash:
-        raise ValueError("observed distribution params_hash must be a non-empty string")
+    if not isinstance(params_hash, str):
+        raise ValueError("observed distribution params_hash must be a string")
     if not isinstance(values, (list, tuple)) or not values:
         raise ValueError("observed distribution values must be a non-empty list or tuple")
     return ObservedDistribution(prompt_id, params_hash, tuple(str(item) for item in values))
