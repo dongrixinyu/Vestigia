@@ -43,10 +43,20 @@ _LOW_VARIANCE_V1: Final[Mapping[str, Any]] = MappingProxyType(
     }
 )
 
+# Kimi uses a separately named profile so its ``top_p`` setting remains part
+# of the fingerprint experiment identity.
+_KIMI_V1: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        **_STANDARD_V1,
+        "top_p": 0.95,
+    }
+)
+
 REQUEST_PARAM_PRESETS: Final[Mapping[str, RequestParams]] = MappingProxyType(
     {
         "standard_v1": _STANDARD_V1,
         "low_variance_v1": _LOW_VARIANCE_V1,
+        "kimi_v1": _KIMI_V1,
     }
 )
 """Immutable catalog of named, versioned request-parameter presets."""

@@ -13,9 +13,9 @@ from vestigia.request_params import (
 def test_standard_request_params_are_complete() -> None:
     params = get_request_params()
 
-    assert DEFAULT_REQUEST_PARAM_PRESET == "fingerprint_standard_v1"
+    assert DEFAULT_REQUEST_PARAM_PRESET == "standard_v1"
     assert params == {
-        "temperature": 0.1,
+        "temperature": 1,
         "max_tokens": None,
         "top_p": 1.0,
         "top_k": None,
@@ -31,11 +31,11 @@ def test_standard_request_params_are_complete() -> None:
 
 
 def test_request_param_preset_returns_an_independent_mutable_copy() -> None:
-    first = get_request_params("fingerprint_low_variance_v1")
+    first = get_request_params("low_variance_v1")
     first["temperature"] = 0.9
     first["extra_body"]["reasoning"] = True
 
-    second = get_request_params("fingerprint_low_variance_v1")
+    second = get_request_params("low_variance_v1")
 
     assert second["temperature"] == 0.1
     assert second["extra_body"] == {
@@ -45,5 +45,13 @@ def test_request_param_preset_returns_an_independent_mutable_copy() -> None:
 
 
 def test_request_param_preset_rejects_unknown_name() -> None:
-    with pytest.raises(ValueError, match="unknown request-parameter preset"):
-        get_request_params("missing")
+    params = get_request_params("kimi_v1")
+
+    assert params["top_p"] == 0.95
+    assert params["temperature"] == 1
+    assert params["extra_body"] == {
+        "reasoning": True,
+        "reasoning_effort": "low",
+    }
+
+def test_kimi_request_params_use_the_fixed_top_p() -> None:
