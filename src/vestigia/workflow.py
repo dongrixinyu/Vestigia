@@ -341,7 +341,7 @@ def predict_distribution(
                 candidates.append((distances, path, reference_params_hash))
             distances, path, reference_params_hash = min(
                 candidates, key=lambda candidate: candidate[0][distance_result_key]
-            )
+            )  # find the most likely reference distribution
             selected_distances.append(distances[distance_result_key])
             feature_matches.append(
                 ObservedFeatureMatch(
@@ -355,7 +355,7 @@ def predict_distribution(
         scored.append(
             _ObservedDistributionScore(
                 model=model,
-                distance=sum(selected_distances) / len(selected_distances),
+                distance=sum(selected_distances) / len(selected_distances),  # mean distance from different prompts
                 feature_matches=tuple(feature_matches),
             )
         )
