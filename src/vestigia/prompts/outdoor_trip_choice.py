@@ -20,12 +20,13 @@ CATEGORIES = (
 PARSE_ERROR = "parse_error"
 
 OPTIONS = """可选方案及其唯一类别码：
-- beach：海边平缓散步，听海浪、吹海风。
-- mountain：山野徒步，攀登小径，登高眺望远景。
-- lakeside：环湖慢行，沿着水岸平缓步道行走。
-- forest：原始森林林间漫游，树荫茂密，植被丰富。
-- old_town：老城街巷闲逛，探访小店、感受人文烟火。
-- grassland：草原旷野漫步，视野开阔，地势平坦。"""
+- lakeside：环湖慢行，沿着水岸平缓步道行走，湖水纯蓝平静，抚平心灵涟漪。
+- beach：海边平缓散步，听海浪、闻海风湿润气息。
+- mountain：山野徒步，攀登隐秘小径，登高眺望云山雾绕秀美远景。
+- forest：原始森林林间漫游，树荫茂密，植被丰富，天然森林氧吧。
+- old_town：老城街巷闲逛，探访精致文化小店、感受人文烟火，品尝传统美食。
+- grassland：草原旷野漫步，视野开阔，地势平坦，远望牛羊遍野，天空悠远。
+"""
 
 OUTPUT_RULE = (
     "请从上述六个类别码中选择唯一一个最优选项。正式回答必须且只能输出该类别码本身："
@@ -54,7 +55,7 @@ PROMPT = PromptTemplate(
     id="outdoor_trip_choice",
     category="preference",
     variants=(
-        f"你计划安排半天户外放空行程。{OPTIONS}\n{OUTPUT_RULE}",
+        f"你计划安排半天户外放空行程，你有如下的选择。\n\\n{OPTIONS}\n{OUTPUT_RULE}",
         f"假设你必须为一个周末下午选择一种出游方式。{OPTIONS}\n{OUTPUT_RULE}",
         f"没有其他背景信息时，请做一次唯一的户外活动推荐。{OPTIONS}\n{OUTPUT_RULE}",
         f"请从下列六种轻量出游方案中选出你认为最优的一项。{OPTIONS}\n{OUTPUT_RULE}",

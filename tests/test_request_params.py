@@ -33,7 +33,7 @@ def test_standard_request_params_are_complete() -> None:
 def test_request_param_preset_returns_an_independent_mutable_copy() -> None:
     first = get_request_params("low_variance_v1")
     first["temperature"] = 0.9
-    first["extra_body"]["reasoning"] = True
+    first["extra_body"]["reasoning"] = False
 
     second = get_request_params("low_variance_v1")
 
@@ -44,7 +44,7 @@ def test_request_param_preset_returns_an_independent_mutable_copy() -> None:
     }
 
 
-def test_request_param_preset_rejects_unknown_name() -> None:
+def test_kimi_request_params_use_the_fixed_top_p() -> None:
     params = get_request_params("kimi_v1")
 
     assert params["top_p"] == 0.95
@@ -54,4 +54,7 @@ def test_request_param_preset_rejects_unknown_name() -> None:
         "reasoning_effort": "low",
     }
 
-def test_kimi_request_params_use_the_fixed_top_p() -> None:
+
+def test_request_param_preset_rejects_unknown_name() -> None:
+    with pytest.raises(ValueError, match="unknown request-parameter preset"):
+        get_request_params("missing")
