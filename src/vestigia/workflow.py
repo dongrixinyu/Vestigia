@@ -32,6 +32,7 @@ _REQUEST_PARAM_NAMES = frozenset(
         "top_k",
         "presence_penalty",
         "frequency_penalty",
+        "timeout",
         "extra_body",
         "extra_headers",
 }
@@ -166,7 +167,7 @@ def create_fingerprint(
 
     ``base_url``, ``api_key`` and ``model`` are the required connection values.
     Put all model request controls in ``request_params``, for example
-    ``{"temperature": 0.1, "max_tokens": 64, "top_p": 0.9}`` for portable
+    ``{"temperature": 0.1, "max_tokens": 64, "top_p": 0.9, "timeout": 120}`` for portable
     controls, and put endpoint-specific controls such as ``reasoning_effort``
     in ``extra_body``. The saved
     JSON can be passed directly to :func:`verify_fingerprint` after loading

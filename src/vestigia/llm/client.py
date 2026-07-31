@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -146,29 +147,42 @@ class LLMClient:
         return normalized
 
     def _completion_with_network_retries(self, request: Mapping[str, Any]) -> Any:
-        """Call LiteLLM, retrying only transient network connection failures."""
+        """Call LiteLLM, retrying transient connection and rate-limit failures."""
         for retry_number in range(NETWORK_RETRY_MAX_RETRIES + 1):
             try:
                 return litellm.completion(**request)
             except Exception as exc:
-                if not _is_network_connection_error(exc):
+                rate_limited = _is_rate_limit_error(exc)
+                if not rate_limited and not _is_network_connection_error(exc):
                     raise
                 if retry_number == NETWORK_RETRY_MAX_RETRIES:
                     logger.error(
-                        "LLM network request failed after {} retries (model={}, endpoint={}): {}",
+                        "LLM request failed after {} retries (model={}, endpoint={}): {}",
                         NETWORK_RETRY_MAX_RETRIES,
                         self.config.model,
                         self.config.endpoint or self.config.base_url,
                         exc,
                     )
                     raise
-                logger.warning(
-                    "LLM network request failed; retrying ({}/{}, model={}): {}",
-                    retry_number + 1,
-                    NETWORK_RETRY_MAX_RETRIES,
-                    self.config.model,
-                    exc,
-                )
+                if rate_limited:
+                    delay = _rate_limit_retry_delay(exc, retry_number)
+                    logger.warning(
+                        "LLM rate limited; retrying in {:.1f}s ({}/{}, model={}): {}",
+                        delay,
+                        retry_number + 1,
+                        NETWORK_RETRY_MAX_RETRIES,
+                        self.config.model,
+                        exc,
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.warning(
+                        "LLM network request failed; retrying ({}/{}, model={}): {}",
+                        retry_number + 1,
+                        NETWORK_RETRY_MAX_RETRIES,
+                        self.config.model,
+                        exc,
+                    )
         raise AssertionError("unreachable")
 
     def _request_options(
@@ -269,6 +283,47 @@ def _validated_generation_parameters(
         for name, value in request_parameters.items()
     }
 
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    """Recognize HTTP 429 and LiteLLM rate-limit exceptions in an error chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "status_code", None) == 429:
+            return True
+        if type(current).__name__ in {"RateLimitError", "TooManyRequestsError"}:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _rate_limit_retry_delay(exc: BaseException, retry_number: int) -> float:
+    """Return Retry-After when available, otherwise capped exponential backoff."""
+    retry_after = _retry_after_seconds(exc)
+    if retry_after is not None:
+        return retry_after
+    return min(2.0**retry_number, 30.0)
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Read a numeric Retry-After header from LiteLLM's wrapped response."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        headers = getattr(response, "headers", None)
+        if isinstance(headers, Mapping):
+            value = headers.get("retry-after") or headers.get("Retry-After")
+            try:
+                if value is not None and float(value) >= 0:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def _is_network_connection_error(exc: BaseException) -> bool:
     """Recognize connection and timeout errors emitted by LiteLLM transports.
 
@@ -279,6 +334,7 @@ def _is_network_connection_error(exc: BaseException) -> bool:
     network_names = {
         "APIConnectionError",
         "APIConnectionTimeoutError",
+        "APITimeoutError",
         "ConnectError",
         "ConnectTimeout",
         "ConnectionError",

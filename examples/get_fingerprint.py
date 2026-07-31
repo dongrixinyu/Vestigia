@@ -44,7 +44,32 @@ def safe_path_component(value: str) -> str:
 # endpoint wire protocol; a relay serving an Anthropic, DeepSeek, Kimi, or
 # other model through OpenAI-compatible APIs must still use
 # provider="openai_compatible".
-MODEL_ENDPOINTS = []
+MODEL_ENDPOINTS = [
+    {
+        "name": "doubao-direct",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "api_key": "03607b4f-3709-4e3c-9c65-0e20abd2b986",
+        "provider": "openai_compatible",
+        "models": [
+            {
+                "model": "doubao-seed-2-0-lite-260215",
+                "request_params": get_request_params()
+            },
+            {
+                "model": "doubao-seed-2-1-pro-260628",
+                "request_params": get_request_params()
+            },
+            {
+                "model": "doubao-seed-evolving",
+                "request_params": get_request_params()
+            },
+            {
+                "model": "doubao-seed-2-1-turbo-260628",
+                "request_params": get_request_params()
+            },
+        ],
+    },
+]
 
 def main() -> None:
     for endpoint in MODEL_ENDPOINTS:

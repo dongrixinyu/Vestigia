@@ -40,6 +40,7 @@ MAX_P95_TV_DISTANCE = 0.20
 # 10 + 10 + 10 + 10 + 8. Set to 1 to force sequential collection.
 LLM_COLLECTION_CONCURRENCY = 10
 
-# Number of retries after the initial request when a network connection error
-# occurs. Change this value to tune retry behavior for all LLM requests.
+# Number of retries after the initial request when a connection, timeout, or
+# rate-limit error occurs. Rate-limit retries honor Retry-After when the
+# endpoint supplies it; otherwise they wait 1, 2, 4, 8, then 16 seconds.
 NETWORK_RETRY_MAX_RETRIES = 5
