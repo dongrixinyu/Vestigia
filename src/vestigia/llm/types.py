@@ -26,7 +26,7 @@ class LLMConfig:
     api_key: str
     model: str
     endpoint: str | None = None
-    timeout: float = 60.0
+    timeout: float = 120.0
     max_tokens: int | None = None
     temperature: float | None = 1.0
     top_p: float | None = 1.0

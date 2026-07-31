@@ -1,0 +1,75 @@
+{
+  "model": "doubao-seed-2-0-lite-260215",
+  "prompt_id": "outdoor_trip_choice",
+  "prompt": "你计划安排半天户外放空行程，你有如下的选择。\n\\n可选方案及其唯一类别码：\n- lakeside：环湖慢行，沿着水岸平缓步道行走，湖水纯蓝平静，抚平心灵涟漪。\n- beach：海边平缓散步，听海浪、闻海风湿润气息。\n- mountain：山野徒步，攀登隐秘小径，登高眺望云山雾绕秀美远景。\n- forest：原始森林林间漫游，树荫茂密，植被丰富，天然森林氧吧。\n- old_town：老城街巷闲逛，探访精致文化小店、感受人文烟火，品尝传统美食。\n- grassland：草原旷野漫步，视野开阔，地势平坦，远望牛羊遍野，天空悠远。\n\n请从上述六个类别码中选择唯一一个最优选项。正式回答必须且只能输出该类别码本身：beach、mountain、lakeside、forest、old_town 或 grassland。不要输出中文名称、数字、理由、标点、Markdown 或任何其他字符。",
+  "parameters_hash": "e309e03fb704f7af",
+  "request_params": {
+    "system_prompt": "You are a helpful assistant. Follow the user's instructions exactly.",
+    "temperature": 1,
+    "max_tokens": null,
+    "top_p": 1.0,
+    "top_k": null,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "timeout": 120.0,
+    "extra_body": {
+      "reasoning": true,
+      "reasoning_effort": "low"
+    },
+    "extra_headers": {}
+  },
+  "feature_kind": "parsed",
+  "field": "parsed.choice",
+  "values": [
+    "beach",
+    "beach",
+    "beach",
+    "beach",
+    "lakeside",
+    "beach",
+    "beach",
+    "beach",
+    "beach",
+    "lakeside",
+    "beach",
+    "beach",
+    "lakeside",
+    "beach",
+    "beach",
+    "beach",
+    "beach",
+    "lakeside",
+    "beach",
+    "beach"
+  ],
+  "distribution": {
+    "beach": 0.8,
+    "lakeside": 0.2
+  },
+  "stability": {
+    "successful_sample_count": 20,
+    "subset_size": 20,
+    "resamples": 1000,
+    "seed": 0,
+    "reference_distribution": {
+      "beach": 0.8,
+      "lakeside": 0.2
+    },
+    "total_variation_distance": {
+      "mean": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "jensen_shannon_distance": {
+      "mean": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "max_p95_tv_distance": 0.2,
+    "reliable": true
+  },
+  "started_at": "2026-07-31T03-07-46",
+  "finished_at": "2026-07-31T03-08-12"
+}

@@ -17,7 +17,7 @@ from vestigia.config import (
     SYSTEM_PROMPT,
 )
 from vestigia.fingerprint import canonical_value, resolve_field
-from vestigia.llm import LLMClient
+from vestigia.llm import LLMClient, LLMRequestError
 from vestigia.validation import (
     compare_distributions,
     distribution,
@@ -205,6 +205,7 @@ def _request_configuration(
         "top_k": getattr(client.config, "top_k", None),
         "presence_penalty": getattr(client.config, "presence_penalty", 0.0),
         "frequency_penalty": getattr(client.config, "frequency_penalty", 0.0),
+        "timeout": getattr(client.config, "timeout", 60.0),
         "extra_body": dict(getattr(client.config, "extra_body", {})),
         "extra_headers": dict(getattr(client.config, "extra_headers", {})),
     }
@@ -223,30 +224,71 @@ def _collect_feature_values(
 ) -> tuple[list[str], list[int] | None]:
     values: list[str] = []
     raw_lengths: list[int] | None = [] if feature_kind == "length" else None
+    sequential = False
     for batch_size in _batch_sizes(count, LLM_COLLECTION_CONCURRENCY):
-        # executor.map preserves input order, so the fingerprint values remain
-        # deterministic with respect to request sequence even though requests
-        # within one batch run concurrently.
-        with ThreadPoolExecutor(max_workers=batch_size) as executor:
-            if system is None:
-                responses = executor.map(lambda _: client.complete(prompt), range(batch_size))
+        if sequential:
+            responses = _complete_sequentially(client, prompt, batch_size, system)
+        else:
+            responses, rate_limited = _complete_concurrently(client, prompt, batch_size, system)
+            if rate_limited:
+                # Preserve successful concurrent samples, but retry only the
+                # rate-limited ones one at a time. All following batches stay
+                # sequential so the endpoint has no further burst traffic.
+                sequential = True
+
+        for response in responses:
+            if feature_kind == "parsed":
+                parsed = parser(response.content)
+                values.append(_distribution_value(resolve_field({"parsed": parsed}, field)))
             else:
-                responses = executor.map(
-                    lambda _: client.complete(prompt, system=system), range(batch_size)
+                output = (
+                    response.content
+                    if length_field == "content"
+                    else response.reasoning_content or ""
                 )
-            for response in responses:
-                if feature_kind == "parsed":
-                    parsed = parser(response.content)
-                    values.append(_distribution_value(resolve_field({"parsed": parsed}, field)))
-                else:
-                    output = (
-                        response.content
-                        if length_field == "content"
-                        else response.reasoning_content or ""
-                    )
-                    raw_lengths.append(len(output))  # type: ignore[union-attr]
-                    values.append(log_length_values([len(output)])[0])
+                raw_lengths.append(len(output))  # type: ignore[union-attr]
+                values.append(log_length_values([len(output)])[0])
     return values, raw_lengths
+
+
+def _complete_concurrently(
+    client: LLMClient, prompt: str, count: int, system: str | None
+) -> tuple[list[Any], bool]:
+    """Complete a batch concurrently, retrying rate-limited items serially."""
+    with ThreadPoolExecutor(max_workers=count) as executor:
+        complete = (
+            (lambda: client.complete(prompt))
+            if system is None
+            else (lambda: client.complete(prompt, system=system))
+        )
+        futures = [executor.submit(complete) for _ in range(count)]
+        responses: list[Any | None] = [None] * count
+        rate_limited_indices: list[int] = []
+        for index, future in enumerate(futures):
+            try:
+                responses[index] = future.result()
+            except LLMRequestError as exc:
+                if not _is_rate_limit_error(exc):
+                    raise
+                rate_limited_indices.append(index)
+
+    for index in rate_limited_indices:
+        responses[index] = _complete_sequentially(client, prompt, 1, system)[0]
+    return [response for response in responses if response is not None], bool(rate_limited_indices)
+
+
+def _complete_sequentially(
+    client: LLMClient, prompt: str, count: int, system: str | None
+) -> list[Any]:
+    """Complete a batch one request at a time to avoid rate-limit bursts."""
+    if system is None:
+        return [client.complete(prompt) for _ in range(count)]
+    return [client.complete(prompt, system=system) for _ in range(count)]
+
+
+def _is_rate_limit_error(exc: LLMRequestError) -> bool:
+    """Recognize a normalized LiteLLM HTTP 429 error without provider coupling."""
+    return exc.status_code == 429 or "ratelimiterror" in str(exc).lower() or "rate limit" in str(exc).lower()
 
 
 def _batch_sizes(count: int, concurrency: int) -> tuple[int, ...]:

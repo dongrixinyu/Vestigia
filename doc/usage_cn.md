@@ -86,7 +86,7 @@ fingerprint = create_fingerprint(
 print(fingerprint.distribution)
 ```
 
-`timeout` 是单次 HTTP 请求的超时时间（秒），默认 `60.0`。批量采集会同时发起最多 10 个请求；若网关并发能力有限，可提高 `timeout`，或将 `src/vestigia/config.py` 中的 `LLM_COLLECTION_CONCURRENCY` 调低（例如设为 `1`）。网络连接和超时错误会自动重试 5 次。请求被服务端限流（HTTP 429）时，会优先遵循响应中的 `Retry-After`，否则依次等待 1、2、4、8、16 秒后重试；重试仍失败时，采集会终止并抛出 `LLMRequestError`。
+`timeout` 是单次 HTTP 请求的超时时间（秒），默认 `60.0`。批量采集会同时发起最多 10 个请求；若网关并发能力有限，可提高 `timeout`，或将 `src/vestigia/config.py` 中的 `LLM_COLLECTION_CONCURRENCY` 调低（例如设为 `1`）。网络连接和超时错误会自动重试 5 次。若并发采集收到服务端限流（HTTP 429），Vestigia 会立即停止后续并发：该批次中限流失败的请求和其后所有请求都会逐个串行调用，而不是对 429 做并发等待重试；串行请求仍被限流时会抛出 `LLMRequestError`。
 
 
 | `prompt_id` | 自动统计的指纹特征 |

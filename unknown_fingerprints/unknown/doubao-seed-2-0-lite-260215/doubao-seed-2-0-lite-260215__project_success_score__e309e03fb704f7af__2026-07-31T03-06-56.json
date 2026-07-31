@@ -1,0 +1,77 @@
+{
+  "model": "doubao-seed-2-0-lite-260215",
+  "prompt_id": "project_success_score",
+  "prompt": "该项目采用B2B企业服务模式，以大型制药公司的研发部门为垂直切入点。其市场进入策略是基于欧洲核子研究中心（CERN）的开源技术Rucio，提供超大规模数据管理解决方案的定制化开发、部署与集成。通过商务拓展（BD）获取付费Pilot项目是其核心获客方式，并计划利用行业痛点（数据孤岛、合规性）和同行压力进行销售。团队对市场趋势和行业痛点有深入理解，但目前尚未获取实际付费客户，策略有效性有待验证。你觉得这个项目多大程度上能够成功？满分为1分，1分代表100%会成功，0分代表完全不可能成功。请估计一个分数。第一行只能输出一个介于0和1之间的数字，越接近1代表其越可能成功；第二行起再简要说明理由。",
+  "parameters_hash": "e309e03fb704f7af",
+  "request_params": {
+    "system_prompt": "You are a helpful assistant. Follow the user's instructions exactly.",
+    "temperature": 1,
+    "max_tokens": null,
+    "top_p": 1.0,
+    "top_k": null,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "timeout": 120.0,
+    "extra_body": {
+      "reasoning": true,
+      "reasoning_effort": "low"
+    },
+    "extra_headers": {}
+  },
+  "feature_kind": "parsed",
+  "field": "parsed.score.value",
+  "values": [
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.4",
+    "0.5",
+    "0.4",
+    "0.4",
+    "0.35"
+  ],
+  "distribution": {
+    "0.4": 0.9,
+    "0.5": 0.05,
+    "0.35": 0.05
+  },
+  "stability": {
+    "successful_sample_count": 20,
+    "subset_size": 20,
+    "resamples": 1000,
+    "seed": 0,
+    "reference_distribution": {
+      "0.4": 0.9,
+      "0.5": 0.05,
+      "0.35": 0.05
+    },
+    "total_variation_distance": {
+      "mean": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "jensen_shannon_distance": {
+      "mean": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "max_p95_tv_distance": 0.2,
+    "reliable": true
+  },
+  "started_at": "2026-07-31T03-06-56",
+  "finished_at": "2026-07-31T03-07-46"
+}

@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Endpoint-specific reasoning effort; sent as extra_body.reasoning_effort",
     )
     parser.add_argument("--max-tokens", type=int, help="Maximum generated tokens")
-    parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds")
+    parser.add_argument("--timeout", type=float, default=120.0, help="HTTP timeout in seconds")
     parser.add_argument("--system", help="Optional system instruction sent with every request")
     parser.add_argument(
         "--extra-headers-json",
