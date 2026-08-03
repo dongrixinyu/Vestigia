@@ -11,6 +11,7 @@ from vestigia.prompts.project_success_score import PROMPT as PROJECT_SUCCESS_SCO
 from vestigia.workflow import (
     _fingerprint_parameters_hash,
     _select_prompt,
+    _validated_request_params,
     load_fingerprint,
     save_fingerprint,
 )
@@ -28,6 +29,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
             "top_k": None,
             "presence_penalty": 0.0,
             "frequency_penalty": 0.0,
+            "timeout": 60.0,
             "reasoning": None,
             "reasoning_effort": None,
             "extra_body": {"top_p": 0.9},
@@ -57,6 +59,7 @@ def test_saved_fingerprint_can_be_loaded_without_http_or_mock_libraries(tmp_path
         "top_k": None,
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
+        "timeout": 60.0,
         "reasoning": None,
         "reasoning_effort": None,
         "extra_body": {"top_p": 0.9},
@@ -124,6 +127,7 @@ def test_parameters_hash_depends_on_request_params_and_system_prompt_only() -> N
     assert _fingerprint_parameters_hash(first) != _fingerprint_parameters_hash(different_system_prompt)
 
 
+
 def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> None:
     fingerprint = ModelFingerprint(
         model="reference-model", prompt="unknown", request_configuration={}, feature_kind="parsed",
@@ -133,6 +137,10 @@ def test_save_fingerprint_requires_a_prompt_id_for_unknown_prompts(tmp_path) -> 
 
     with pytest.raises(ValueError, match="prompt_id"):
         save_fingerprint(fingerprint, tmp_path)
+
+
+def test_request_params_accept_timeout() -> None:
+    assert _validated_request_params({"timeout": 300.0})["timeout"] == 300.0
 
 
 def test_selecting_a_builtin_prompt_uses_its_fixed_variant_and_parser() -> None:

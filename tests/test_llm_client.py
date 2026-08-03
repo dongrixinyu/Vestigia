@@ -8,6 +8,14 @@ from vestigia import LLMClient, LLMConfig, LLMRequestError
 from vestigia.config import SYSTEM_PROMPT
 
 
+class APITimeoutError(Exception):
+    """Test double matching LiteLLM's timeout exception class name."""
+
+
+class RateLimitError(Exception):
+    """Test double matching LiteLLM's rate-limit exception class name."""
+
+
 @patch("vestigia.llm.client.logger.info")
 @patch("vestigia.llm.client.litellm.completion")
 def test_client_routes_openai_compatible_request_through_litellm(completion, info_log) -> None:
@@ -235,6 +243,42 @@ def test_network_errors_retry_then_emit_failure_alert(error_log, completion) -> 
     assert error_log.call_args.args[1] == 5
 
 
+@patch("vestigia.llm.client.litellm.completion", side_effect=APITimeoutError("request timed out"))
+def test_litellm_api_timeouts_are_retried(completion) -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example",
+            api_key="secret",
+            model="model",
+        )
+    )
+
+    with pytest.raises(LLMRequestError, match="request timed out"):
+        client.complete("hello")
+
+    assert completion.call_count == 6  # Initial call plus five configured retries.
+
+
+@patch("vestigia.llm.client.time.sleep")
+@patch("vestigia.llm.client.litellm.completion", side_effect=RateLimitError("too many requests"))
+def test_litellm_rate_limits_are_retried_with_increasing_delay(completion, sleep) -> None:
+    client = LLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            base_url="https://gateway.example",
+            api_key="secret",
+            model="model",
+        )
+    )
+
+    with pytest.raises(LLMRequestError, match="too many requests"):
+        client.complete("hello")
+
+    assert completion.call_count == 6  # Initial call plus five configured retries.
+    # Rate-limit backoff doubles the pacing delay for each retry.
+    assert client._rate_limit_delay == 8.0
+    assert sleep.call_count == 5
 @patch("vestigia.llm.client.litellm.completion", side_effect=RuntimeError("bad key"))
 def test_litellm_errors_are_normalized(_completion) -> None:
     client = LLMClient(
