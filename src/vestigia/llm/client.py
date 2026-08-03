@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -25,6 +27,13 @@ _GENERATION_PARAMETER_NAMES = frozenset(
 
 litellm.disable_remote_model_cost_map = True
 
+# Normal requests are sent immediately when no rate-limit signal has been seen.
+# Once a provider returns 429, retries start at 0.5 seconds and back off.
+_RATE_LIMIT_BACKOFF_MIN_DELAY = 60.0 / 120.0
+_RATE_LIMIT_MAX_DELAY = 30.0
+_RATE_LIMIT_BACKOFF = 2.0
+_RATE_LIMIT_RECOVERY_STEP = 60.0 / 120.0
+
 
 class LLMClient:
     """Call every supported model through :func:`litellm.completion`.
@@ -37,6 +46,9 @@ class LLMClient:
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
+        self._rate_limit_lock = threading.Lock()
+        self._last_request_started = 0.0
+        self._rate_limit_delay = 0.0
 
     def __enter__(self) -> LLMClient:
         return self
@@ -146,11 +158,32 @@ class LLMClient:
         return normalized
 
     def _completion_with_network_retries(self, request: Mapping[str, Any]) -> Any:
-        """Call LiteLLM, retrying only transient network connection failures."""
+        """Call LiteLLM with adaptive pacing and transient-error retries."""
         for retry_number in range(NETWORK_RETRY_MAX_RETRIES + 1):
+            self._wait_for_request_slot()
             try:
-                return litellm.completion(**request)
+                response = litellm.completion(**request)
             except Exception as exc:
+                if _is_rate_limit_error(exc):
+                    delay = self._backoff_after_rate_limit()
+                    if retry_number == NETWORK_RETRY_MAX_RETRIES:
+                        logger.error(
+                            "LLM rate-limited after {} retries (model={}, endpoint={}): {}",
+                            NETWORK_RETRY_MAX_RETRIES,
+                            self.config.model,
+                            self.config.endpoint or self.config.base_url,
+                            exc,
+                        )
+                        raise
+                    logger.warning(
+                        "LLM request rate-limited; retrying after {:.2f}s ({}/{}, model={}): {}",
+                        delay,
+                        retry_number + 1,
+                        NETWORK_RETRY_MAX_RETRIES,
+                        self.config.model,
+                        exc,
+                    )
+                    continue
                 if not _is_network_connection_error(exc):
                     raise
                 if retry_number == NETWORK_RETRY_MAX_RETRIES:
@@ -169,7 +202,38 @@ class LLMClient:
                     self.config.model,
                     exc,
                 )
+                continue
+            self._recover_after_success()
+            return response
         raise AssertionError("unreachable")
+
+    def _wait_for_request_slot(self) -> None:
+        """Reserve a paced request slot, including across worker threads."""
+        with self._rate_limit_lock:
+            wait = self._rate_limit_delay - (time.monotonic() - self._last_request_started)
+            if wait > 0:
+                logger.debug("Waiting {:.2f}s before LLM request", wait)
+                time.sleep(wait)
+            self._last_request_started = time.monotonic()
+
+    def _backoff_after_rate_limit(self) -> float:
+        with self._rate_limit_lock:
+            self._rate_limit_delay = min(
+                _RATE_LIMIT_MAX_DELAY,
+                max(
+                    _RATE_LIMIT_BACKOFF_MIN_DELAY,
+                    max(self._rate_limit_delay, _RATE_LIMIT_BACKOFF_MIN_DELAY)
+                    * _RATE_LIMIT_BACKOFF,
+                ),
+            )
+            return self._rate_limit_delay
+
+    def _recover_after_success(self) -> None:
+        with self._rate_limit_lock:
+            self._rate_limit_delay = max(
+                0.0,
+                self._rate_limit_delay - _RATE_LIMIT_RECOVERY_STEP,
+            )
 
     def _request_options(
         self,
@@ -268,6 +332,22 @@ def _validated_generation_parameters(
         name: dict(value) if name == "reasoning" and isinstance(value, Mapping) else value
         for name, value in request_parameters.items()
     }
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    """Recognize HTTP 429 and LiteLLM/provider rate-limit wrapper errors."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "status_code", None) == 429:
+            return True
+        name = type(current).__name__.lower()
+        text = str(current).lower()
+        if "ratelimit" in name or "rate limit" in text or "too many requests" in text:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
 
 def _is_network_connection_error(exc: BaseException) -> bool:
     """Recognize connection and timeout errors emitted by LiteLLM transports.

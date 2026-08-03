@@ -52,11 +52,23 @@ _KIMI_V1: Final[Mapping[str, Any]] = MappingProxyType(
     }
 )
 
+_OPENROUTER_V1: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        **_STANDARD_V1,
+        "extra_body": MappingProxyType({}),
+        "extra_headers": MappingProxyType({
+            "X-OpenRouter-Cache": "false"  # turn off cache, Disable cache for this request to avoid returning stale results.
+        }),
+    }
+)
+
+
 REQUEST_PARAM_PRESETS: Final[Mapping[str, RequestParams]] = MappingProxyType(
     {
         "standard_v1": _STANDARD_V1,
         "low_variance_v1": _LOW_VARIANCE_V1,
         "kimi_v1": _KIMI_V1,
+        "openrouter_v1": _OPENROUTER_V1,
     }
 )
 """Immutable catalog of named, versioned request-parameter presets."""

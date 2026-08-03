@@ -38,7 +38,7 @@ MAX_P95_TV_DISTANCE = 0.20
 # Maximum simultaneous requests made while collecting repeated samples. Requests
 # are submitted in fixed-size batches, so 48 samples with this set to 10 run as
 # 10 + 10 + 10 + 10 + 8. Set to 1 to force sequential collection.
-LLM_COLLECTION_CONCURRENCY = 10
+LLM_COLLECTION_CONCURRENCY = 1
 
 # Number of retries after the initial request when a network connection or
 # timeout error occurs. Rate-limit errors are handled by fingerprint collection,
